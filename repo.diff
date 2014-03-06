@@ -1,0 +1,3718 @@
+
+project bionic/
+diff --git a/libc/private/bionic_tls.h b/libc/private/bionic_tls.h
+index fa1de50..5e346e2 100644
+--- a/libc/private/bionic_tls.h
++++ b/libc/private/bionic_tls.h
+@@ -100,9 +100,7 @@ extern int __set_tls(void *ptr);
+  * C library, because we don't know where the corresponding code
+  * is going to run.
+  */
+-#  if defined(LIBC_STATIC) || \
+-     (defined(__ARM_ARCH_6__) && defined(HAVE_ARM_TLS_REGISTER) && \
+-     !defined(__ARM_ARCH_6T2__))
++#  ifdef LIBC_STATIC
+ 
+ /* Use the kernel helper in static C library. */
+   typedef volatile void* (__kernel_get_tls_t)(void);
+@@ -113,12 +111,6 @@ extern int __set_tls(void *ptr);
+  * Note that HAVE_ARM_TLS_REGISTER is build-specific
+  * (it must match your kernel configuration)
+  */
+-#  ifdef HAVE_TEGRA_ERRATA_657451
+-#    define __munge_tls(_v) ( ((_v)&~((1ul<<20)|1ul)) | (((_v)&0x1)<<20) )
+-#  else
+-#    define __munge_tls(_v) (_v)
+-#endif
+-
+ #    ifdef HAVE_ARM_TLS_REGISTER
+  /* We can read the address directly from a coprocessor
+   * register, which avoids touching the data cache
+@@ -127,13 +119,14 @@ extern int __set_tls(void *ptr);
+ #      define __get_tls() \
+     ({ register unsigned int __val asm("r0"); \
+        asm ("mrc p15, 0, r0, c13, c0, 3" : "=r"(__val) ); \
+-       __val = __munge_tls(__val); \
+        (volatile void*)__val; })
+ #    else /* !HAVE_ARM_TLS_REGISTER */
+  /* The kernel provides the address of the TLS at a fixed
+   * address of the magic page too.
+   */
+-#      define __get_tls() ( *((volatile void **) 0xffff0ff0) )
++/* #      define __get_tls() ( *((volatile void **) 0xffff0ff0) ) */
++  typedef volatile void* (__kernel_get_tls_t)(void);
++#    define __get_tls() (*(__kernel_get_tls_t *)0xffff0fe0)()
+ #    endif
+ #  endif /* !LIBC_STATIC */
+ #else /* !ARM */
+
+project build/
+diff --git a/core/legacy_prebuilts.mk b/core/legacy_prebuilts.mk
+index 41943b1..d7a3b22 100644
+--- a/core/legacy_prebuilts.mk
++++ b/core/legacy_prebuilts.mk
+@@ -123,4 +123,5 @@ GRANDFATHERED_ALL_PREBUILT := \
+ 	wl1271.bin \
+ 	zoneinfo.dat \
+ 	zoneinfo.idx \
+-	zoneinfo.version
++	zoneinfo.version \
++	egl.cfg
+diff --git a/target/board/generic/device.mk b/target/board/generic/device.mk
+index 4edcc19..c0ae31c 100644
+--- a/target/board/generic/device.mk
++++ b/target/board/generic/device.mk
+@@ -19,13 +19,14 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     development/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+     development/data/etc/vold.conf:system/etc/vold.conf \
+     development/tools/emulator/system/camera/media_profiles.xml:system/etc/media_profiles.xml \
++	brcm_usrlib/dag/vmcsx/egl.cfg:system/lib/egl/egl.cfg \
+ 
+ PRODUCT_PACKAGES := \
+-    audio.primary.goldfish
++    audio.primary.goldfish \
++	libGLES_hgl
+
+project development/
+diff --git a/samples/FmRadioReceiver/Android.mk b/samples/FmRadioReceiver/Android.mk
+deleted file mode 100755
+index 177ce93..0000000
+--- a/samples/FmRadioReceiver/Android.mk
++++ /dev/null
+@@ -1,10 +0,0 @@
+-LOCAL_PATH:= $(call my-dir)
+-include $(CLEAR_VARS)
+-
+-LOCAL_MODULE_TAGS := samples
+-
+-LOCAL_SRC_FILES := $(call all-subdir-java-files)
+-
+-LOCAL_PACKAGE_NAME := FmRadioReceiver
+-
+-include $(BUILD_PACKAGE)
+diff --git a/samples/FmRadioReceiver/AndroidManifest.xml b/samples/FmRadioReceiver/AndroidManifest.xml
+deleted file mode 100755
+index f1aae65..0000000
+--- a/samples/FmRadioReceiver/AndroidManifest.xml
++++ /dev/null
+@@ -1,15 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-	package="com.example.android.fmradioreceiver" android:versionCode="1"
+-	android:versionName="1.0">
+-	<application android:icon="@drawable/icon" android:label="@string/app_name">
+-		<activity android:name=".FmRadioReceiver" android:label="@string/app_name">
+-			<intent-filter>
+-				<action android:name="android.intent.action.MAIN" />
+-				<category android:name="android.intent.category.LAUNCHER" />
+-			</intent-filter>
+-		</activity>
+-	</application>
+-	<uses-permission android:name="com.stericsson.permission.FM_RADIO_TRANSMITTER"></uses-permission>
+-	<uses-permission android:name="com.stericsson.permission.FM_RADIO_RECEIVER"></uses-permission>
+-</manifest>
+diff --git a/samples/FmRadioReceiver/_index.html b/samples/FmRadioReceiver/_index.html
+deleted file mode 100755
+index 080591e..0000000
+--- a/samples/FmRadioReceiver/_index.html
++++ /dev/null
+@@ -1,15 +0,0 @@
+-<p>FmRadioReceiver is a sample application that demonstrates the use of the
+-<a href="../../../reference/android/fm/FmReceiver.html">android.fm.FmReceiver</a>
+-class to implement a FM Radio receiver in an application. The application allows the
+-user to tune to any local radio stations, switch between them, scan for new stations and
+-mute the radio. It also allows the user to change the radio band to their suit their location.
+-The use of listeners is shown to display the tuned station name if RDS data is present.</p>
+-
+-<p>The FmRadioReceiver.java file in FmRadioReceiver also illustrates the interaction with
+-the MediaPlayer. </p>
+-
+-<p><strong>See also:</strong><br/>
+-<a href="../../../reference/android/fm/FmBand.html">FmBand</a></p>
+-<a href="../../../reference/android/fm/FmTransmitter.html">FmTransmitter</a></p>
+-
+-<img alt="" src="../images/FmRadioReceiver.png"  />
+diff --git a/samples/FmRadioReceiver/res/drawable/backward.png b/samples/FmRadioReceiver/res/drawable/backward.png
+deleted file mode 100755
+index c53408f..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/backward.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/backwardbutton.xml b/samples/FmRadioReceiver/res/drawable/backwardbutton.xml
+deleted file mode 100755
+index 22ff201..0000000
+--- a/samples/FmRadioReceiver/res/drawable/backwardbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/backwardpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/backwardpress" />
+-	<item android:drawable="@drawable/backward" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/drawable/backwardpress.png b/samples/FmRadioReceiver/res/drawable/backwardpress.png
+deleted file mode 100755
+index 3fcfada..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/backwardpress.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/forward.png b/samples/FmRadioReceiver/res/drawable/forward.png
+deleted file mode 100755
+index a3f6a75..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/forward.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/forwardbutton.xml b/samples/FmRadioReceiver/res/drawable/forwardbutton.xml
+deleted file mode 100755
+index bbefffc..0000000
+--- a/samples/FmRadioReceiver/res/drawable/forwardbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/forwardpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/forwardpress" />
+-	<item android:drawable="@drawable/forward" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/drawable/forwardpress.png b/samples/FmRadioReceiver/res/drawable/forwardpress.png
+deleted file mode 100755
+index 417b99d..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/forwardpress.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/icon.png b/samples/FmRadioReceiver/res/drawable/icon.png
+deleted file mode 100755
+index a07c69f..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/icon.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/pause.png b/samples/FmRadioReceiver/res/drawable/pause.png
+deleted file mode 100755
+index ff5ffd7..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/pause.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/pausebutton.xml b/samples/FmRadioReceiver/res/drawable/pausebutton.xml
+deleted file mode 100755
+index 92b7c89..0000000
+--- a/samples/FmRadioReceiver/res/drawable/pausebutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/pausepress" />
+-	<item android:state_focused="true" android:drawable="@drawable/pausepress" />
+-	<item android:drawable="@drawable/pause" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/drawable/pausepress.png b/samples/FmRadioReceiver/res/drawable/pausepress.png
+deleted file mode 100755
+index e4d978c..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/pausepress.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/play.png b/samples/FmRadioReceiver/res/drawable/play.png
+deleted file mode 100755
+index 5b77d3b..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/play.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/playbutton.xml b/samples/FmRadioReceiver/res/drawable/playbutton.xml
+deleted file mode 100755
+index 12ba91e..0000000
+--- a/samples/FmRadioReceiver/res/drawable/playbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/playpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/playpress" />
+-	<item android:drawable="@drawable/play" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/drawable/playpress.png b/samples/FmRadioReceiver/res/drawable/playpress.png
+deleted file mode 100755
+index c0063c7..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/playpress.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/rescan.png b/samples/FmRadioReceiver/res/drawable/rescan.png
+deleted file mode 100755
+index 2d2cc2a..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/rescan.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/drawable/rescanbutton.xml b/samples/FmRadioReceiver/res/drawable/rescanbutton.xml
+deleted file mode 100755
+index 9585ff5..0000000
+--- a/samples/FmRadioReceiver/res/drawable/rescanbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/rescanpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/rescanpress" />
+-	<item android:drawable="@drawable/rescan" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/drawable/rescanpress.png b/samples/FmRadioReceiver/res/drawable/rescanpress.png
+deleted file mode 100755
+index a03ce7a..0000000
+Binary files a/samples/FmRadioReceiver/res/drawable/rescanpress.png and /dev/null differ
+diff --git a/samples/FmRadioReceiver/res/layout/main.xml b/samples/FmRadioReceiver/res/layout/main.xml
+deleted file mode 100755
+index 355823d..0000000
+--- a/samples/FmRadioReceiver/res/layout/main.xml
++++ /dev/null
+@@ -1,49 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<LinearLayout android:layout_width="fill_parent"
+-	android:layout_height="fill_parent" android:orientation="vertical"
+-	xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/MainWindow"
+-	android:gravity="center">
+-	<TextView android:layout_width="fill_parent"
+-		android:layout_height="wrap_content" android:text="@string/fmradio"
+-		android:textSize="50px" android:id="@+id/PSNTextView" android:gravity="center"></TextView>
+-	<TextView android:layout_width="fill_parent"
+-		android:layout_height="wrap_content" android:id="@+id/FrequencyTextView"
+-		android:lines="1" android:textSize="90px" android:gravity="center"
+-		android:text="@string/dashes"></TextView>
+-	<LinearLayout android:id="@+id/TopRow"
+-		android:layout_height="wrap_content" android:layout_width="fill_parent"
+-		android:gravity="center">
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="right" android:paddingRight="10px">
+-			<Button android:layout_height="wrap_content"
+-				android:layout_width="wrap_content" android:id="@+id/ScanDown"
+-				android:background="@drawable/backwardbutton"/>
+-		</LinearLayout>
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="left" android:paddingLeft="10px">
+-			<Button android:layout_height="wrap_content"
+-				android:layout_width="wrap_content" android:id="@+id/ScanUp"
+-				android:background="@drawable/forwardbutton" />
+-		</LinearLayout>
+-	</LinearLayout>
+-	<LinearLayout android:id="@+id/BottonRow"
+-		android:layout_height="wrap_content" android:layout_width="fill_parent"
+-		android:gravity="center">
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="right" android:paddingRight="10px">
+-			<Button android:layout_height="wrap_content"
+-				android:layout_width="wrap_content" android:id="@+id/FullScan"
+-				android:background="@drawable/rescanbutton"/>
+-		</LinearLayout>
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="left" android:paddingLeft="10px">
+-			<Button android:layout_height="wrap_content"
+-				android:layout_width="wrap_content" android:id="@+id/Pause"
+-				android:background="@drawable/pausebutton" />
+-		</LinearLayout>
+-	</LinearLayout>
+-</LinearLayout> 
+\ No newline at end of file
+diff --git a/samples/FmRadioReceiver/res/values/strings.xml b/samples/FmRadioReceiver/res/values/strings.xml
+deleted file mode 100755
+index ec714c2..0000000
+--- a/samples/FmRadioReceiver/res/values/strings.xml
++++ /dev/null
+@@ -1,12 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<resources>
+-	<string name="app_name">FmRadioReceiver</string>
+-	<string name="band_select">Select Band</string>
+-	<string name="band_us">U.S</string>
+-	<string name="band_eu">Europe</string>
+-	<string name="band_ja">Japan</string>
+-	<string name="band_ch">China</string>
+-	<string name="station_select">Select Station</string>
+-	<string name="fmradio">FM RADIO</string>
+-	<string name="dashes">- - - -</string>
+-</resources>
+diff --git a/samples/FmRadioReceiver/src/com/example/android/fmradioreceiver/FmRadioReceiver.java b/samples/FmRadioReceiver/src/com/example/android/fmradioreceiver/FmRadioReceiver.java
+deleted file mode 100755
+index 269dd84..0000000
+--- a/samples/FmRadioReceiver/src/com/example/android/fmradioreceiver/FmRadioReceiver.java
++++ /dev/null
+@@ -1,518 +0,0 @@
+-/*
+- * Copyright (C) 2011 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package com.example.android.fmradioreceiver;
+-
+-import android.app.Activity;
+-import android.content.Context;
+-import android.content.SharedPreferences;
+-import android.media.MediaPlayer;
+-import android.os.Bundle;
+-import android.util.Log;
+-import android.view.Menu;
+-import android.view.MenuItem;
+-import android.view.SubMenu;
+-import android.view.View;
+-import android.view.View.OnClickListener;
+-import android.widget.ArrayAdapter;
+-import android.widget.Button;
+-import android.widget.TextView;
+-import android.widget.Toast;
+-import com.stericsson.hardware.fm.FmBand;
+-import com.stericsson.hardware.fm.FmReceiver;
+-
+-import java.io.IOException;
+-
+-
+-public class FmRadioReceiver extends Activity {
+-
+-    // The string to find in android logs
+-    private static final String LOG_TAG = "FM Radio Demo App";
+-
+-    // The string to show that the station list is empty
+-    private static final String EMPTY_STATION_LIST = "No stations available";
+-
+-    // The 50kHz channel offset
+-    private static final int CHANNEL_OFFSET_50KHZ = 50;
+-
+-    // The base menu identifier
+-    private static final int BASE_OPTION_MENU = 0;
+-
+-    // The band menu identifier
+-    private static final int BAND_SELECTION_MENU = 1;
+-
+-    // The station menu identifier
+-    private static final int STATION_SELECTION_MENU = 2;
+-
+-    // Handle to the Media Player that plays the audio from the selected station
+-    private MediaPlayer mMediaPlayer;
+-
+-    // The scan listener that receives the return values from the scans
+-    private FmReceiver.OnScanListener mReceiverScanListener;
+-
+-    // The listener that receives the RDS data from the current channel
+-    private FmReceiver.OnRDSDataFoundListener mReceiverRdsDataFoundListener;
+-
+-    // The started listener is activated when the radio has started
+-    private FmReceiver.OnStartedListener mReceiverStartedListener;
+-
+-    // Displays the currently tuned frequency
+-    private TextView mFrequencyTextView;
+-
+-    // Displays the current station name if there is adequate RDS data
+-    private TextView mStationNameTextView;
+-
+-    // Handle to the FM radio Band object
+-    private FmBand mFmBand;
+-
+-    // Handle to the FM radio receiver object
+-    private FmReceiver mFmReceiver;
+-
+-    // Indicates if we are in the initialization sequence
+-    private boolean mInit = true;
+-
+-    // Indicates that we are restarting the app
+-    private boolean mRestart = false;
+-
+-    // Protects the MediaPlayer and FmReceiver against rapid muting causing
+-    // errors
+-    private boolean mPauseMutex = false;
+-
+-    // Array of the available stations in MHz
+-    private ArrayAdapter<CharSequence> mMenuAdapter;
+-
+-    // The name of the storage string
+-    public static final String PREFS_NAME = "FMRadioPrefsFile";
+-
+-    // The menu items
+-    public static final int FM_BAND = Menu.FIRST;
+-
+-    public static final int BAND_US = Menu.FIRST + 1;
+-
+-    public static final int BAND_EU = Menu.FIRST + 2;
+-
+-    public static final int BAND_JAPAN = Menu.FIRST + 3;
+-
+-    public static final int BAND_CHINA = Menu.FIRST + 4;
+-
+-    public static final int STATION_SELECT = Menu.FIRST + 5;
+-
+-    public static final int STATION_SELECT_MENU_ITEMS = STATION_SELECT + 1;
+-
+-    // The currently selected FM Radio band
+-    private int mSelectedBand;
+-
+-    /**
+-     * Required method from parent class
+-     *
+-     * @param icicle - The previous instance of this app
+-     */
+-    @Override
+-    public void onCreate(Bundle icicle) {
+-        super.onCreate(icicle);
+-        setContentView(R.layout.main);
+-        mFmReceiver = (FmReceiver) getSystemService("fm_receiver");
+-        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+-        mSelectedBand = settings.getInt("selectedBand", 1);
+-        mFmBand = new FmBand(mSelectedBand);
+-        setupButtons();
+-    }
+-
+-    /**
+-     * Starts up the listeners and the FM radio if it isn't already active
+-     */
+-    @Override
+-    protected void onStart() {
+-        super.onStart();
+-        mReceiverScanListener = new com.stericsson.hardware.fm.FmReceiver.OnScanListener() {
+-
+-            // FullScan results
+-            public void onFullScan(int[] frequency, int[] signalStrength, boolean aborted) {
+-                ((Button) findViewById(R.id.FullScan)).setEnabled(true);
+-                showToast("Fullscan complete", Toast.LENGTH_LONG);
+-                mMenuAdapter.clear();
+-                if (frequency.length == 0) {
+-                    mMenuAdapter.add(EMPTY_STATION_LIST);
+-                    return;
+-                }
+-                for (int i = 0; i < frequency.length; i++) {
+-                    String a = Double.toString((double) frequency[i] / 1000);
+-                    if (mFmBand.getChannelOffset() == CHANNEL_OFFSET_50KHZ) {
+-                        a = String.format(a, "%.2f");
+-                    } else {
+-                        a = String.format(a, "%.1f");
+-                    }
+-                    mMenuAdapter.add(a);
+-                }
+-                if (mInit) {
+-                    mInit = false;
+-                    try {
+-                        mFmReceiver.setFrequency(frequency[0]);
+-                        mFrequencyTextView.setText(mMenuAdapter.getItem(0).toString());
+-                    } catch (IOException e) {
+-                        showToast("Unable to set the receiver's frequency", Toast.LENGTH_LONG);
+-                    } catch (IllegalArgumentException e) {
+-                        showToast("Unable to set the receiver's frequency", Toast.LENGTH_LONG);
+-                    }
+-                }
+-            }
+-
+-            // Returns the new frequency.
+-            public void onScan(int tunedFrequency, int signalStrength, int scanDirection, boolean aborted) {
+-                String a = Double.toString((double) tunedFrequency / 1000);
+-                if (mFmBand.getChannelOffset() == CHANNEL_OFFSET_50KHZ) {
+-                    mFrequencyTextView.setText(String.format(a, "%.2f"));
+-                } else {
+-                    mFrequencyTextView.setText(String.format(a, "%.1f"));
+-                }
+-                ((Button) findViewById(R.id.ScanUp)).setEnabled(true);
+-                ((Button) findViewById(R.id.ScanDown)).setEnabled(true);
+-            }
+-        };
+-        mReceiverRdsDataFoundListener = new com.stericsson.hardware.fm.FmReceiver.OnRDSDataFoundListener() {
+-
+-            // Receives the current frequency's RDS Data
+-            public void onRDSDataFound(Bundle rdsData, int frequency) {
+-                if (rdsData.containsKey("PSN")) {
+-                    mStationNameTextView.setText(rdsData.getString("PSN"));
+-                }
+-            }
+-        };
+-
+-        mReceiverStartedListener = new com.stericsson.hardware.fm.FmReceiver.OnStartedListener() {
+-
+-            public void onStarted() {
+-                // Activate all the buttons
+-                ((Button) findViewById(R.id.ScanUp)).setEnabled(true);
+-                ((Button) findViewById(R.id.ScanDown)).setEnabled(true);
+-                ((Button) findViewById(R.id.Pause)).setEnabled(true);
+-                ((Button) findViewById(R.id.FullScan)).setEnabled(true);
+-                initialBandscan();
+-                startAudio();
+-            }
+-        };
+-
+-        mFmReceiver.addOnScanListener(mReceiverScanListener);
+-        mFmReceiver.addOnRDSDataFoundListener(mReceiverRdsDataFoundListener);
+-        mFmReceiver.addOnStartedListener(mReceiverStartedListener);
+-
+-        if (!mRestart) {
+-            turnRadioOn();
+-        }
+-        mRestart = false;
+-    }
+-
+-    /**
+-     * Stops the FM Radio listeners
+-     */
+-    @Override
+-    protected void onRestart() {
+-        super.onRestart();
+-        mRestart = true;
+-    }
+-
+-    /**
+-     * Stops the FM Radio listeners
+-     */
+-    @Override
+-    protected void onStop() {
+-        super.onStop();
+-
+-        if (mFmReceiver != null) {
+-            mFmReceiver.removeOnScanListener(mReceiverScanListener);
+-            mFmReceiver.removeOnRDSDataFoundListener(mReceiverRdsDataFoundListener);
+-            mFmReceiver.removeOnStartedListener(mReceiverStartedListener);
+-        }
+-    }
+-
+-    /**
+-     * Saves the FmBand for next time the program is used and closes the radio
+-     * and media player.
+-     */
+-    @Override
+-    protected void onDestroy() {
+-        super.onDestroy();
+-        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+-        SharedPreferences.Editor editor = settings.edit();
+-        editor.putInt("selectedBand", mSelectedBand);
+-        editor.commit();
+-        try {
+-            mFmReceiver.reset();
+-        } catch (IOException e) {
+-            Log.e(LOG_TAG, "Unable to reset correctly", e);
+-        }
+-        if (mMediaPlayer != null) {
+-            mMediaPlayer.release();
+-            mMediaPlayer = null;
+-        }
+-    }
+-
+-    /**
+-     * Starts the initial bandscan in it's own thread
+-     */
+-    private void initialBandscan() {
+-        Thread bandscanThread = new Thread() {
+-            public void run() {
+-                try {
+-                    mFmReceiver.startFullScan();
+-                } catch (IllegalStateException e) {
+-                    showToast("Unable to start the scan", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-            }
+-        };
+-        bandscanThread.start();
+-    }
+-
+-    /**
+-     * Helper method to display toast
+-     */
+-    private void showToast(final String text, final int duration) {
+-        runOnUiThread(new Runnable() {
+-            public void run() {
+-                Toast.makeText(getApplicationContext(), text, duration).show();
+-            }
+-        });
+-    }
+-
+-    /**
+-     * Starts the FM receiver and makes the buttons appear inactive
+-     */
+-    private void turnRadioOn() {
+-
+-        try {
+-            mFmReceiver.startAsync(mFmBand);
+-            // Darken the the buttons
+-            ((Button) findViewById(R.id.ScanUp)).setEnabled(false);
+-            ((Button) findViewById(R.id.ScanDown)).setEnabled(false);
+-            ((Button) findViewById(R.id.Pause)).setEnabled(false);
+-            ((Button) findViewById(R.id.FullScan)).setEnabled(false);
+-            showToast("Scanning initial stations", Toast.LENGTH_LONG);
+-        } catch (IOException e) {
+-            showToast("Unable to start the radio receiver.", Toast.LENGTH_LONG);
+-        } catch (IllegalStateException e) {
+-            showToast("Unable to start the radio receiver.", Toast.LENGTH_LONG);
+-        }
+-    }
+-
+-    /**
+-     * Starts the FM receiver and makes the buttons appear inactive
+-     */
+-    private void startAudio() {
+-
+-        mMediaPlayer = new MediaPlayer();
+-        try {
+-            mMediaPlayer.setDataSource("fmradio://rx");
+-            mMediaPlayer.prepare();
+-            mMediaPlayer.start();
+-        } catch (IOException e) {
+-            showToast("Unable to start the media player", Toast.LENGTH_LONG);
+-        }
+-    }
+-
+-    /**
+-     * Sets up the buttons and their listeners
+-     */
+-    private void setupButtons() {
+-
+-        mMenuAdapter = new ArrayAdapter<CharSequence>(this, android.R.layout.simple_spinner_item);
+-        mMenuAdapter.setDropDownViewResource(android.R.layout.simple_list_item_single_choice);
+-        mMenuAdapter.add("No stations available");
+-        mFrequencyTextView = (TextView) findViewById(R.id.FrequencyTextView);
+-        mStationNameTextView = (TextView) findViewById(R.id.PSNTextView);
+-
+-        final Button scanUp = (Button) findViewById(R.id.ScanUp);
+-        scanUp.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                try {
+-                    mFmReceiver.scanUp();
+-                } catch (IllegalStateException e) {
+-                    showToast("Unable to ScanUp", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-                scanUp.setEnabled(false);
+-            }
+-        });
+-        final Button scanDown = (Button) findViewById(R.id.ScanDown);
+-        scanDown.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                try {
+-                    mFmReceiver.scanDown();
+-                } catch (IllegalStateException e) {
+-                    showToast("Unable to ScanDown", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-                scanDown.setEnabled(false);
+-            }
+-        });
+-        final Button pause = (Button) findViewById(R.id.Pause);
+-        pause.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                if (mFmReceiver.getState() == FmReceiver.STATE_PAUSED && mPauseMutex != true) {
+-                    try {
+-                        mPauseMutex = true;
+-                        mFmReceiver.resume();
+-                        mMediaPlayer.start();
+-                        pause.setBackgroundResource(R.drawable.pausebutton);
+-                    } catch (IOException e) {
+-                        showToast("Unable to resume", Toast.LENGTH_LONG);
+-                    } catch (IllegalStateException e) {
+-                        showToast("Unable to resume", Toast.LENGTH_LONG);
+-                    }
+-                    mPauseMutex = false;
+-                } else if (mFmReceiver.getState() == FmReceiver.STATE_STARTED
+-                        && mPauseMutex != true) {
+-                    try {
+-                        mPauseMutex = true;
+-                        mMediaPlayer.pause();
+-                        mFmReceiver.pause();
+-                        pause.setBackgroundResource(R.drawable.playbutton);
+-                    } catch (IOException e) {
+-                        showToast("Unable to pause", Toast.LENGTH_LONG);
+-                    } catch (IllegalStateException e) {
+-                        showToast("Unable to pause", Toast.LENGTH_LONG);
+-                    }
+-                    mPauseMutex = false;
+-                } else if (mPauseMutex) {
+-                    showToast("MediaPlayer busy. Please wait and try again.", Toast.LENGTH_LONG);
+-                } else {
+-                    Log.i(LOG_TAG, "No action: incorrect state - " + mFmReceiver.getState());
+-                }
+-            }
+-        });
+-        final Button fullScan = (Button) findViewById(R.id.FullScan);
+-        fullScan.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                try {
+-                    fullScan.setEnabled(false);
+-                    showToast("Scanning for stations", Toast.LENGTH_LONG);
+-                    mFmReceiver.startFullScan();
+-                } catch (IllegalStateException e) {
+-                    showToast("Unable to start the scan", Toast.LENGTH_LONG);
+-                }
+-            }
+-        });
+-    }
+-
+-    /**
+-     * Sets up the options menu when the menu button is pushed, dynamic
+-     * population of the station select menu
+-     */
+-    public boolean onPrepareOptionsMenu(Menu menu) {
+-        menu.clear();
+-        boolean result = super.onCreateOptionsMenu(menu);
+-        SubMenu subMenu = menu.addSubMenu(BASE_OPTION_MENU, FM_BAND, Menu.NONE,
+-                R.string.band_select);
+-        subMenu.setIcon(android.R.drawable.ic_menu_mapmode);
+-        // Populate the band selection menu
+-        subMenu.add(BAND_SELECTION_MENU, BAND_US, Menu.NONE, R.string.band_us);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_EU, Menu.NONE, R.string.band_eu);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_JAPAN, Menu.NONE, R.string.band_ja);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_CHINA, Menu.NONE, R.string.band_ch);
+-        subMenu.setGroupCheckable(BAND_SELECTION_MENU, true, true);
+-        subMenu.getItem(mSelectedBand).setChecked(true);
+-
+-        subMenu = menu.addSubMenu(BASE_OPTION_MENU, STATION_SELECT, Menu.NONE,
+-                R.string.station_select);
+-        subMenu.setIcon(android.R.drawable.ic_menu_agenda);
+-
+-        // Dynamically populate the station select menu each time the option
+-        // button is pushed
+-        if (mMenuAdapter.isEmpty()) {
+-            subMenu.setGroupEnabled(STATION_SELECTION_MENU, false);
+-        } else {
+-            subMenu.setGroupEnabled(STATION_SELECTION_MENU, true);
+-            for (int i = 0; i < mMenuAdapter.getCount(); i++) {
+-                subMenu.add(STATION_SELECTION_MENU, STATION_SELECT_MENU_ITEMS + i, Menu.NONE,
+-                        mMenuAdapter.getItem(i));
+-            }
+-            subMenu.setGroupCheckable(STATION_SELECTION_MENU, true, true);
+-        }
+-        return result;
+-    }
+-
+-    public int getSelectStationMenuItem(MenuItem item) {
+-        return item.getItemId() - STATION_SELECT_MENU_ITEMS;
+-    }
+-
+-    /**
+-     * React to a selection in the option menu
+-     */
+-    @Override
+-    public boolean onOptionsItemSelected(MenuItem item) {
+-
+-        switch (item.getGroupId()) {
+-            case BAND_SELECTION_MENU:
+-                switch (item.getItemId()) {
+-                    case BAND_US:
+-                        mSelectedBand = FmBand.BAND_US;
+-                        item.setChecked(true);
+-                        break;
+-                    case BAND_EU:
+-                        mSelectedBand = FmBand.BAND_EU;
+-                        item.setChecked(true);
+-                        break;
+-                    case BAND_JAPAN:
+-                        mSelectedBand = FmBand.BAND_JAPAN;
+-                        item.setChecked(true);
+-                        break;
+-                    case BAND_CHINA:
+-                        mSelectedBand = FmBand.BAND_CHINA;
+-                        item.setChecked(true);
+-                        break;
+-                    default:
+-                        break;
+-                }
+-                mFmBand = new FmBand(mSelectedBand);
+-                try {
+-                    mFmReceiver.reset();
+-                } catch (IOException e) {
+-                    showToast("Unable to restart the FM Radio", Toast.LENGTH_LONG);
+-                }
+-                if (mMediaPlayer != null) {
+-                    mMediaPlayer.release();
+-                    mMediaPlayer = null;
+-                }
+-                turnRadioOn();
+-                break;
+-            case STATION_SELECTION_MENU:
+-                try {
+-                    if (!mMenuAdapter.getItem(getSelectStationMenuItem(item)).toString().matches(
+-                            EMPTY_STATION_LIST)) {
+-                        mFmReceiver.setFrequency((int) (Double.valueOf(mMenuAdapter.getItem(
+-                                getSelectStationMenuItem(item)).toString()) * 1000));
+-                        mFrequencyTextView.setText(mMenuAdapter.getItem(
+-                                getSelectStationMenuItem(item)).toString());
+-                    }
+-                } catch (IOException e) {
+-                    showToast("Unable to set the frequency", Toast.LENGTH_LONG);
+-                } catch (IllegalStateException e) {
+-                    showToast("Unable to set the frequency", Toast.LENGTH_LONG);
+-                } catch (IllegalArgumentException e) {
+-                    showToast("Unable to set the frequency", Toast.LENGTH_LONG);
+-                }
+-
+-                break;
+-            default:
+-                break;
+-        }
+-        return super.onOptionsItemSelected(item);
+-    }
+-}
+diff --git a/samples/FmRadioTransmitter/Android.mk b/samples/FmRadioTransmitter/Android.mk
+deleted file mode 100755
+index 0c25b35..0000000
+--- a/samples/FmRadioTransmitter/Android.mk
++++ /dev/null
+@@ -1,12 +0,0 @@
+-LOCAL_PATH:= $(call my-dir)
+-include $(CLEAR_VARS)
+-
+-LOCAL_MODULE_TAGS := samples
+-
+-LOCAL_SRC_FILES := $(call all-subdir-java-files)
+-
+-LOCAL_PACKAGE_NAME := FmRadioTransmitter
+-
+-LOCAL_SDK_VERSION := current
+-
+-include $(BUILD_PACKAGE)
+diff --git a/samples/FmRadioTransmitter/AndroidManifest.xml b/samples/FmRadioTransmitter/AndroidManifest.xml
+deleted file mode 100755
+index ec0d336..0000000
+--- a/samples/FmRadioTransmitter/AndroidManifest.xml
++++ /dev/null
+@@ -1,16 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-	package="com.example.android.fmradiotransmitter" android:versionCode="1"
+-	android:versionName="1.0">
+-	<application android:icon="@drawable/icon" android:label="@string/app_name">
+-		<activity android:name=".FmRadioTransmitter" android:label="@string/app_name">
+-			<intent-filter>
+-				<action android:name="android.intent.action.MAIN" />
+-				<category android:name="android.intent.category.LAUNCHER" />
+-			</intent-filter>
+-		</activity>
+-
+-	</application>
+-	<uses-permission android:name="android.permission.FM_RADIO_TRANSMITTER"></uses-permission>
+-	<uses-permission android:name="android.permission.FM_RADIO_RECEIVER"></uses-permission>
+-</manifest> 
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/_index.html b/samples/FmRadioTransmitter/_index.html
+deleted file mode 100755
+index 0a286e2..0000000
+--- a/samples/FmRadioTransmitter/_index.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>FmRadioTransmitter is a sample application that demonstrates the use of the
+-<a href="../../../reference/android/fm/FmTransmitter.html">android.fm.FmTransmitter</a>
+-class to implement a FM Radio transmitter in an application. The application allows the
+-user to scan the 88MHz-90MHz frequency region for the channel with the least signal
+-interference. The application then transmits any audio using the FM Radio chip.</p>
+-
+-<p>The suggested use is to start a long media file in the MediaPlayer application
+-then turn on the FmRadioTransmitter sample application.</p>
+-
+-<p><strong>See also:</strong><br/>
+-<a href="../../../reference/android/fm/FmBand.html">FmBand</a></p>
+-<a href="../../../reference/android/fm/FmReceiver.html">FmReceiver</a></p>
+-
+-<img alt="" src="../images/FmRadioTransmitter.png"  />
+diff --git a/samples/FmRadioTransmitter/res/drawable/anim.xml b/samples/FmRadioTransmitter/res/drawable/anim.xml
+deleted file mode 100755
+index 4a06a4f..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/anim.xml
++++ /dev/null
+@@ -1,7 +0,0 @@
+-<animation-list xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:oneshot="false">
+-    <item android:drawable="@drawable/transmit1" android:duration="200" />
+-    <item android:drawable="@drawable/transmit2" android:duration="200" />
+-    <item android:drawable="@drawable/transmit3" android:duration="200" />
+-    <item android:drawable="@drawable/transmit4" android:duration="200" />
+-</animation-list>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/backward.png b/samples/FmRadioTransmitter/res/drawable/backward.png
+deleted file mode 100755
+index c53408f..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/backward.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/backwardbutton.xml b/samples/FmRadioTransmitter/res/drawable/backwardbutton.xml
+deleted file mode 100755
+index 22ff201..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/backwardbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/backwardpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/backwardpress" />
+-	<item android:drawable="@drawable/backward" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/backwardpress.png b/samples/FmRadioTransmitter/res/drawable/backwardpress.png
+deleted file mode 100755
+index 3fcfada..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/backwardpress.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/forward.png b/samples/FmRadioTransmitter/res/drawable/forward.png
+deleted file mode 100755
+index a3f6a75..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/forward.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/forwardbutton.xml b/samples/FmRadioTransmitter/res/drawable/forwardbutton.xml
+deleted file mode 100755
+index bbefffc..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/forwardbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/forwardpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/forwardpress" />
+-	<item android:drawable="@drawable/forward" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/forwardpress.png b/samples/FmRadioTransmitter/res/drawable/forwardpress.png
+deleted file mode 100755
+index 417b99d..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/forwardpress.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/icon.png b/samples/FmRadioTransmitter/res/drawable/icon.png
+deleted file mode 100755
+index a07c69f..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/icon.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/rescan.png b/samples/FmRadioTransmitter/res/drawable/rescan.png
+deleted file mode 100755
+index 2d2cc2a..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/rescan.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/rescanbutton.xml b/samples/FmRadioTransmitter/res/drawable/rescanbutton.xml
+deleted file mode 100755
+index 9585ff5..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/rescanbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/rescanpress" />
+-	<item android:state_focused="true" android:drawable="@drawable/rescanpress" />
+-	<item android:drawable="@drawable/rescan" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/rescanpress.png b/samples/FmRadioTransmitter/res/drawable/rescanpress.png
+deleted file mode 100755
+index a03ce7a..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/rescanpress.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmit1.png b/samples/FmRadioTransmitter/res/drawable/transmit1.png
+deleted file mode 100755
+index ecf4803..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmit1.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmit2.png b/samples/FmRadioTransmitter/res/drawable/transmit2.png
+deleted file mode 100755
+index 19aaeda..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmit2.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmit3.png b/samples/FmRadioTransmitter/res/drawable/transmit3.png
+deleted file mode 100755
+index 5303824..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmit3.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmit4.png b/samples/FmRadioTransmitter/res/drawable/transmit4.png
+deleted file mode 100755
+index 39e4190..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmit4.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitgo.png b/samples/FmRadioTransmitter/res/drawable/transmitgo.png
+deleted file mode 100755
+index af8639c..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmitgo.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitgobutton.xml b/samples/FmRadioTransmitter/res/drawable/transmitgobutton.xml
+deleted file mode 100755
+index b486bbe..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/transmitgobutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/transmitgopress" />
+-	<item android:state_focused="true" android:drawable="@drawable/transmitgopress" />
+-	<item android:drawable="@drawable/transmitgo" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitgopress.png b/samples/FmRadioTransmitter/res/drawable/transmitgopress.png
+deleted file mode 100755
+index b9319c9..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmitgopress.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitstop.png b/samples/FmRadioTransmitter/res/drawable/transmitstop.png
+deleted file mode 100755
+index a1871ba..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmitstop.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitstopbutton.xml b/samples/FmRadioTransmitter/res/drawable/transmitstopbutton.xml
+deleted file mode 100755
+index 79c2db9..0000000
+--- a/samples/FmRadioTransmitter/res/drawable/transmitstopbutton.xml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<selector xmlns:android="http://schemas.android.com/apk/res/android">
+-	<item android:state_pressed="true" android:drawable="@drawable/transmitstoppress" />
+-	<item android:state_focused="true" android:drawable="@drawable/transmitstoppress" />
+-	<item android:drawable="@drawable/transmitstop" />
+-</selector>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/drawable/transmitstoppress.png b/samples/FmRadioTransmitter/res/drawable/transmitstoppress.png
+deleted file mode 100755
+index eee7306..0000000
+Binary files a/samples/FmRadioTransmitter/res/drawable/transmitstoppress.png and /dev/null differ
+diff --git a/samples/FmRadioTransmitter/res/layout/main.xml b/samples/FmRadioTransmitter/res/layout/main.xml
+deleted file mode 100755
+index 1669bb3..0000000
+--- a/samples/FmRadioTransmitter/res/layout/main.xml
++++ /dev/null
+@@ -1,43 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<LinearLayout android:layout_width="fill_parent"
+-	android:layout_height="fill_parent" android:orientation="vertical"
+-	android:gravity="center" xmlns:android="http://schemas.android.com/apk/res/android"
+-	android:id="@+id/MainWindow">
+-	<ImageView android:layout_y="40px" android:layout_height="80px"
+-		android:layout_x="120px" android:id="@+id/TransmitIcon"
+-		android:layout_width="160px"></ImageView>
+-	<TextView android:layout_width="wrap_content"
+-		android:layout_height="wrap_content" android:layout_gravity="center_horizontal"
+-		android:text="@string/dashes" android:padding="40px" android:id="@+id/FrequencyTextView"
+-		android:lines="1" android:textSize="60px"></TextView>
+-	<LinearLayout android:layout_width="fill_parent"
+-		android:orientation="horizontal" android:layout_height="wrap_content"
+-		android:layout_gravity="center_horizontal" android:id="@+id/ButtonRow"
+-		android:paddingBottom="40px">
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="center" android:id="@+id/Left">
+-			<Button android:layout_width="wrap_content"
+-				android:layout_height="wrap_content" android:padding="10px"
+-				android:id="@+id/BlockScan" android:background="@drawable/rescanbutton" />
+-		</LinearLayout>
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="center" android:id="@+id/Centre">
+-			<Button android:layout_width="wrap_content"
+-				android:layout_height="wrap_content" android:padding="10px"
+-				android:id="@+id/ScanDown" android:background="@drawable/backwardbutton" />
+-		</LinearLayout>
+-		<LinearLayout android:layout_width="fill_parent"
+-			android:layout_height="wrap_content" android:layout_weight="1"
+-			android:gravity="center" android:id="@+id/Right">
+-			<Button android:layout_width="wrap_content"
+-				android:layout_height="wrap_content" android:padding="10px"
+-				android:id="@+id/ScanUp" android:background="@drawable/forwardbutton" />
+-
+-		</LinearLayout>
+-	</LinearLayout>
+-	<Button android:id="@+id/Transmit" android:layout_x="40px"
+-		android:layout_y="300px" android:layout_height="60px"
+-		android:layout_width="200px" android:background="@drawable/transmitgobutton" />
+-</LinearLayout>
+\ No newline at end of file
+diff --git a/samples/FmRadioTransmitter/res/values/strings.xml b/samples/FmRadioTransmitter/res/values/strings.xml
+deleted file mode 100755
+index 32d8048..0000000
+--- a/samples/FmRadioTransmitter/res/values/strings.xml
++++ /dev/null
+@@ -1,10 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<resources>
+-    <string name="app_name">FM Radio Transmitter</string>
+-    <string name="band_select">Select Band</string>
+-    <string name="band_us">U.S</string>
+-    <string name="band_eu">Europe</string>
+-    <string name="band_ja">Japan</string>
+-    <string name="band_ch">China</string>
+-    <string name="dashes">----</string>
+-</resources>
+diff --git a/samples/FmRadioTransmitter/src/com/example/android/fmradiotransmitter/FmRadioTransmitter.java b/samples/FmRadioTransmitter/src/com/example/android/fmradiotransmitter/FmRadioTransmitter.java
+deleted file mode 100755
+index e06095e..0000000
+--- a/samples/FmRadioTransmitter/src/com/example/android/fmradiotransmitter/FmRadioTransmitter.java
++++ /dev/null
+@@ -1,384 +0,0 @@
+-/*
+- * Copyright (C) 2011 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package com.example.android.fmradiotransmitter;
+-
+-import android.app.Activity;
+-import android.content.Context;
+-import android.content.SharedPreferences;
+-import android.hardware.fm.FmBand;
+-import android.hardware.fm.FmTransmitter;
+-import android.graphics.drawable.AnimationDrawable;
+-import android.os.Bundle;
+-import android.view.Menu;
+-import android.view.MenuItem;
+-import android.view.SubMenu;
+-import android.view.View;
+-import android.view.View.OnClickListener;
+-import android.widget.Button;
+-import android.widget.ImageView;
+-import android.widget.TextView;
+-import android.widget.Toast;
+-
+-public class FmRadioTransmitter extends Activity {
+-
+-    // Scan range that works for all bands
+-    private static final int MINSCANRANGE = 88000;
+-
+-    private static final int MAXSCANRANGE = 90000;
+-
+-    // The 50kHz channel offset
+-    private static final int CHANNEL_OFFSET_50KHZ = 50;
+-
+-    // The scan listener that receives the return values from the scans
+-    private FmTransmitter.OnScanListener mTransmitterScanListener;
+-
+-    // The started listener is activated when the radio has started
+-    private FmTransmitter.OnStartedListener mTransmitterStartedListener;
+-
+-    // Displays the currently tuned frequency
+-    private TextView mFrequencyTextView;
+-
+-    // Handle to the FM radio Band object
+-    private FmBand mFmBand;
+-
+-    // Handle to the FM radio transmitter object
+-    private FmTransmitter mFmTransmitter;
+-
+-    // The frequency that the radio is currently tuned to.
+-    private int mCurrentfrequency;
+-
+-    // The current band's channel offset.
+-    private int mFrequencyIncrement;
+-
+-    // Handle to the Transmitter's Animation.
+-    private AnimationDrawable mTransmitAnimation;
+-
+-    // The name of the storage string
+-    public static final String PREFS_NAME = "FMRadioPrefsFile";
+-
+-    // The currently selected FM Radio band
+-    private int mSelectedBand;
+-
+-    // The base menu identifier
+-    private static final int BASE_OPTION_MENU = 0;
+-
+-    // The band menu identifier
+-    private static final int BAND_SELECTION_MENU = 1;
+-
+-    // The menu items
+-    public static final int FM_BAND = Menu.FIRST;
+-
+-    public static final int BAND_US = Menu.FIRST + 1;
+-
+-    public static final int BAND_EU = Menu.FIRST + 2;
+-
+-    public static final int BAND_JAPAN = Menu.FIRST + 3;
+-
+-    public static final int BAND_CHINA = Menu.FIRST + 4;
+-
+-    /**
+-     * Required method from parent class
+-     *
+-     * @param icicle - The previous instance of this app
+-     */
+-    @Override
+-    public void onCreate(Bundle icicle) {
+-        super.onCreate(icicle);
+-        setContentView(R.layout.main);
+-        mFmTransmitter = (FmTransmitter) getSystemService(Context.RADIO_FM_TRANSMITTER_SERVICE);
+-        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+-        mSelectedBand = settings.getInt("selectedBand", 1);
+-        mFmBand = new FmBand(mSelectedBand);
+-        mFrequencyIncrement = mFmBand.getChannelOffset();
+-        setupButtons();
+-        setupAnimation();
+-    }
+-
+-    /**
+-     * Starts up the listeners and the FM radio if it isn't already active
+-     */
+-    @Override
+-    protected void onStart() {
+-        super.onStart();
+-        mTransmitterStartedListener = new android.hardware.fm.FmTransmitter.OnStartedListener() {
+-
+-            public void onStarted() {
+-                mTransmitAnimation.start();
+-                ((Button) findViewById(R.id.Transmit))
+-                        .setBackgroundResource(R.drawable.transmitstopbutton);
+-                mCurrentfrequency = mFmBand.getDefaultFrequency();
+-                mFrequencyIncrement = mFmBand.getChannelOffset();
+-                blockscan();
+-            }
+-        };
+-
+-        mTransmitterScanListener = new android.hardware.fm.FmTransmitter.OnScanListener() {
+-
+-            public void onBlockScan(int[] frequency, int[] signalStrength, boolean aborted) {
+-                ((Button) findViewById(R.id.BlockScan)).setEnabled(true);
+-                int minFreq = 0;
+-                int minSigStr = Integer.MAX_VALUE;
+-                for (int i = 0; i < frequency.length; i++) {
+-                    if (signalStrength[i] < minSigStr) {
+-                        minSigStr = signalStrength[i];
+-                        minFreq = frequency[i];
+-                    }
+-                }
+-                try {
+-                    mFmTransmitter.setFrequency(minFreq);
+-                } catch (Exception e) {
+-                    showToast("Unable to set the frequency after scanning", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-                mCurrentfrequency = minFreq;
+-                displayFreq();
+-            }
+-        };
+-        mFmTransmitter.addOnScanListener(mTransmitterScanListener);
+-        mFmTransmitter.addOnStartedListener(mTransmitterStartedListener);
+-    }
+-
+-    /**
+-     * Stops the FM Radio listeners
+-     */
+-    @Override
+-    protected void onStop() {
+-        super.onStop();
+-        if (mFmTransmitter != null) {
+-            mFmTransmitter.removeOnScanListener(mTransmitterScanListener);
+-            mFmTransmitter.removeOnStartedListener(mTransmitterStartedListener);
+-        }
+-    }
+-
+-    /**
+-     * Saves the FmBand for next time the program is used and closes the radio
+-     * and media player.
+-     */
+-    @Override
+-    protected void onDestroy() {
+-        super.onDestroy();
+-        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+-        SharedPreferences.Editor editor = settings.edit();
+-        editor.putInt("selectedBand", mSelectedBand);
+-        editor.commit();
+-        try {
+-            mFmTransmitter.reset();
+-        } catch (Exception e) {
+-            showToast("Unable to reset the radio hardware.", Toast.LENGTH_LONG);
+-        }
+-    }
+-
+-    /**
+-     * Starts a blockscan in a seperate thread.
+-     */
+-    protected void blockscan() {
+-        showToast("Performining blockscan", Toast.LENGTH_LONG);
+-        Thread blockscanThread = new Thread() {
+-            public void run() {
+-                try {
+-                    mFmTransmitter.startBlockScan(MINSCANRANGE, MAXSCANRANGE);
+-                } catch (Exception e) {
+-                    showToast("Unable to start BlockScan between " + String.valueOf(MINSCANRANGE)
+-                            + "-" + String.valueOf(MAXSCANRANGE), Toast.LENGTH_LONG);
+-                    return;
+-                }
+-            }
+-        };
+-        blockscanThread.start();
+-    }
+-
+-    /**
+-     * Helper function that formats and displays the current frequency.
+-     */
+-    private void displayFreq() {
+-        String a = Double.toString((double) mCurrentfrequency / 1000);
+-        if (mFmBand.getChannelOffset() == CHANNEL_OFFSET_50KHZ) {
+-            mFrequencyTextView.setText(String.format(a, "%.2f"));
+-        } else {
+-            mFrequencyTextView.setText(String.format(a, "%.1f"));
+-        }
+-    }
+-
+-    /**
+-     * Sets up the button animation
+-     */
+-    private void setupAnimation() {
+-        ImageView transmitImage = (ImageView) findViewById(R.id.TransmitIcon);
+-        transmitImage.setBackgroundResource(R.drawable.anim);
+-        mTransmitAnimation = (AnimationDrawable) transmitImage.getBackground();
+-    }
+-
+-    /**
+-     * Helper method to display toast
+-     */
+-    private void showToast(final String text, final int duration) {
+-        runOnUiThread(new Runnable() {
+-            public void run() {
+-                Toast.makeText(getApplicationContext(), text, duration).show();
+-            }
+-        });
+-    }
+-
+-    /**
+-     * Sets up the button's onclick listeners
+-     */
+-    private void setupButtons() {
+-        mFrequencyTextView = (TextView) findViewById(R.id.FrequencyTextView);
+-        final Button tuneUp = (Button) findViewById(R.id.ScanUp);
+-        tuneUp.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                try {
+-                    ((Button) findViewById(R.id.ScanUp)).setEnabled(false);
+-                    mFmTransmitter.setFrequency(mCurrentfrequency + mFrequencyIncrement);
+-                } catch (Exception e) {
+-                    showToast("Unable to scan up", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-                mCurrentfrequency += mFrequencyIncrement;
+-                displayFreq();
+-                ((Button) findViewById(R.id.ScanUp)).setEnabled(true);
+-            }
+-        });
+-        final Button tuneDown = (Button) findViewById(R.id.ScanDown);
+-        tuneDown.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                try {
+-                    ((Button) findViewById(R.id.ScanDown)).setEnabled(false);
+-                    mFmTransmitter.setFrequency(mCurrentfrequency - mFrequencyIncrement);
+-                } catch (Exception e) {
+-                    showToast("Unable to scan down", Toast.LENGTH_LONG);
+-                    return;
+-                }
+-                mCurrentfrequency -= mFrequencyIncrement;
+-                displayFreq();
+-                ((Button) findViewById(R.id.ScanDown)).setEnabled(true);
+-            }
+-        });
+-        final Button transmit = (Button) findViewById(R.id.Transmit);
+-        transmit.setBackgroundResource(R.drawable.transmitgobutton);
+-        transmit.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                switch (mFmTransmitter.getState()) {
+-
+-                    case FmTransmitter.STATE_IDLE:
+-                        try {
+-                            mFmTransmitter.startAsync(mFmBand);
+-                            showToast("Preparing radio", Toast.LENGTH_LONG);
+-                        } catch (Exception e) {
+-                            showToast("Unable to start radio", Toast.LENGTH_LONG);
+-                            return;
+-                        }
+-
+-                        break;
+-                    case FmTransmitter.STATE_PAUSED:
+-                        try {
+-                            mFmTransmitter.resume();
+-                        } catch (Exception e) {
+-                            showToast("Unable to resume radio", Toast.LENGTH_LONG);
+-                            return;
+-                        }
+-                        mTransmitAnimation.start();
+-                        transmit.setBackgroundResource(R.drawable.transmitstopbutton);
+-
+-                        break;
+-                    case FmTransmitter.STATE_STARTED:
+-                        try {
+-                            mFmTransmitter.pause();
+-                        } catch (Exception e) {
+-                            showToast("Unable to pause radio", Toast.LENGTH_LONG);
+-                            return;
+-                        }
+-                        mTransmitAnimation.stop();
+-                        transmit.setBackgroundResource(R.drawable.transmitgobutton);
+-                        break;
+-                    default:
+-                }
+-            }
+-        });
+-        final Button blockscan = (Button) findViewById(R.id.BlockScan);
+-        blockscan.setOnClickListener(new OnClickListener() {
+-
+-            public void onClick(View v) {
+-                blockscan();
+-            }
+-        });
+-    }
+-
+-    /**
+-     * Sets up the options menu when the menu button is push, dynamic population
+-     * of the station select menu
+-     */
+-    public boolean onPrepareOptionsMenu(Menu menu) {
+-        menu.clear();
+-        boolean result = super.onCreateOptionsMenu(menu);
+-        SubMenu subMenu = menu.addSubMenu(BASE_OPTION_MENU, FM_BAND, Menu.NONE,
+-                R.string.band_select);
+-        subMenu.setIcon(android.R.drawable.ic_menu_mapmode);
+-        // Populate the band selection menu
+-        subMenu.add(BAND_SELECTION_MENU, BAND_US, Menu.NONE, R.string.band_us);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_EU, Menu.NONE, R.string.band_eu);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_CHINA, Menu.NONE, R.string.band_ch);
+-        subMenu.add(BAND_SELECTION_MENU, BAND_JAPAN, Menu.NONE, R.string.band_ja);
+-        subMenu.setGroupCheckable(BAND_SELECTION_MENU, true, true);
+-        subMenu.getItem(mSelectedBand).setChecked(true);
+-        return result;
+-    }
+-
+-    /**
+-     * React to a selection in the option menu
+-     */
+-    @Override
+-    public boolean onOptionsItemSelected(MenuItem item) {
+-
+-        if (item.getGroupId() == BAND_SELECTION_MENU) {
+-            switch (item.getItemId()) {
+-                case BAND_US:
+-                    mSelectedBand = FmBand.BAND_US;
+-                    item.setChecked(true);
+-                    break;
+-                case BAND_EU:
+-                    mSelectedBand = FmBand.BAND_EU;
+-                    item.setChecked(true);
+-                    break;
+-                case BAND_JAPAN:
+-                    mSelectedBand = FmBand.BAND_JAPAN;
+-                    item.setChecked(true);
+-                    break;
+-                case BAND_CHINA:
+-                    mSelectedBand = FmBand.BAND_CHINA;
+-                    item.setChecked(true);
+-                    break;
+-                default:
+-                    break;
+-            }
+-            mFmBand = new FmBand(mSelectedBand);
+-            try {
+-                mFmTransmitter.reset();
+-                ((Button) findViewById(R.id.Transmit))
+-                        .setBackgroundResource(R.drawable.transmitgobutton);
+-                ((TextView) findViewById(R.id.FrequencyTextView)).setText("----");
+-                mFrequencyIncrement = mFmBand.getChannelOffset() / 1000;
+-                mTransmitAnimation.stop();
+-            } catch (Exception e) {
+-                showToast("Unable to restart the FM Radio", Toast.LENGTH_LONG);
+-            }
+-        }
+-        return super.onOptionsItemSelected(item);
+-    }
+-}
+diff --git a/tools/emulator/opengl/host/renderer/Android.mk b/tools/emulator/opengl/host/renderer/Android.mk
+index 55fcb80..5e4d0bb 100644
+--- a/tools/emulator/opengl/host/renderer/Android.mk
++++ b/tools/emulator/opengl/host/renderer/Android.mk
+@@ -5,6 +5,7 @@ $(call emugl-begin-host-executable,emulator_renderer)
+ $(call emugl-import,libOpenglRender)
+ LOCAL_SRC_FILES := main.cpp
+ LOCAL_CFLAGS    += -O0 -g
++LOCAL_LDLIBS += -lX11
+ 
+ #ifeq ($(HOST_OS),windows)
+ #LOCAL_LDLIBS += -lws2_32
+diff --git a/tools/emulator/opengl/host/tools/emugen/main.cpp b/tools/emulator/opengl/host/tools/emugen/main.cpp
+index 96377f2..b15f814 100644
+--- a/tools/emulator/opengl/host/tools/emugen/main.cpp
++++ b/tools/emulator/opengl/host/tools/emugen/main.cpp
+@@ -15,6 +15,7 @@
+ */
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <getopt.h>
+ #include "errors.h"
+ #include "EntryPoint.h"
+ #include "strUtils.h"
+
+project external/webrtc/
+diff --git a/src/common_audio/resampler/main/source/Android.mk b/src/common_audio/resampler/main/source/Android.mk
+index b78e3af..67d6036 100644
+--- a/src/common_audio/resampler/main/source/Android.mk
++++ b/src/common_audio/resampler/main/source/Android.mk
+@@ -25,8 +25,15 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DNO_HEAPCHECKER' \
+     '-DWEBRTC_TARGET_PC' \
+     '-DWEBRTC_LINUX' \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/common_audio/signal_processing_library/main/source/Android.mk b/src/common_audio/signal_processing_library/main/source/Android.mk
+index 401a7f6..f65aa44 100644
+--- a/src/common_audio/signal_processing_library/main/source/Android.mk
++++ b/src/common_audio/signal_processing_library/main/source/Android.mk
+@@ -70,9 +70,17 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_LINUX' 
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
+ endif
++
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/common_audio/vad/main/source/Android.mk b/src/common_audio/vad/main/source/Android.mk
+index f52df93..51ff983 100644
+--- a/src/common_audio/vad/main/source/Android.mk
++++ b/src/common_audio/vad/main/source/Android.mk
+@@ -31,9 +31,16 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_LINUX' 
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
+ endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/aec/main/source/Android.mk b/src/modules/audio_processing/aec/main/source/Android.mk
+index f16f26b..c8f9854 100644
+--- a/src/modules/audio_processing/aec/main/source/Android.mk
++++ b/src/modules/audio_processing/aec/main/source/Android.mk
+@@ -30,13 +30,20 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_THREAD_RR'
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
+ else
+ LOCAL_SRC_FILES += \
+     aec_core_sse2.c \
+     aec_rdft_sse2.c
+ endif
++
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/aecm/main/source/Android.mk b/src/modules/audio_processing/aecm/main/source/Android.mk
+index 7ed9f36..3a299ba 100644
+--- a/src/modules/audio_processing/aecm/main/source/Android.mk
++++ b/src/modules/audio_processing/aecm/main/source/Android.mk
+@@ -28,9 +28,16 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_THREAD_RR'
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
+ endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/agc/main/source/Android.mk b/src/modules/audio_processing/agc/main/source/Android.mk
+index e045839..bb64fe5 100644
+--- a/src/modules/audio_processing/agc/main/source/Android.mk
++++ b/src/modules/audio_processing/agc/main/source/Android.mk
+@@ -22,9 +22,16 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_THREAD_RR'
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
+ endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/main/source/Android.mk b/src/modules/audio_processing/main/source/Android.mk
+index 634ad6a..fb1ca38 100644
+--- a/src/modules/audio_processing/main/source/Android.mk
++++ b/src/modules/audio_processing/main/source/Android.mk
+@@ -40,9 +40,17 @@ MY_DEFS := '-DNO_TCMALLOC' \
+ #   -DWEBRTC_NS_FLOAT'
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
+ endif
++endif
++
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/main/test/process_test/Android.mk b/src/modules/audio_processing/main/test/process_test/Android.mk
+index 23080aa..dd084fd 100644
+--- a/src/modules/audio_processing/main/test/process_test/Android.mk
++++ b/src/modules/audio_processing/main/test/process_test/Android.mk
+@@ -22,9 +22,15 @@ LOCAL_CFLAGS := \
+     '-DWEBRTC_TARGET_PC' \
+     '-DWEBRTC_LINUX' \
+     '-DWEBRTC_THREAD_RR' \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
+ 
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++LOCAL_CFLAGS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CPPFLAGS := 
+ LOCAL_LDFLAGS :=
+ LOCAL_C_INCLUDES := \
+diff --git a/src/modules/audio_processing/main/test/process_test/process_test.cc b/src/modules/audio_processing/main/test/process_test/process_test.cc
+index c62345f..4262725 100644
+--- a/src/modules/audio_processing/main/test/process_test/process_test.cc
++++ b/src/modules/audio_processing/main/test/process_test/process_test.cc
+@@ -10,9 +10,7 @@
+ 
+ #include <stdio.h>
+ #include <string.h>
+-#ifdef WEBRTC_ANDROID
+ #include <sys/stat.h>
+-#endif
+ 
+ #include "tick_util.h"
+ #include "gtest/gtest.h"
+diff --git a/src/modules/audio_processing/main/test/unit_test/Android.mk b/src/modules/audio_processing/main/test/unit_test/Android.mk
+index b2029cf..76f268a 100644
+--- a/src/modules/audio_processing/main/test/unit_test/Android.mk
++++ b/src/modules/audio_processing/main/test/unit_test/Android.mk
+@@ -22,9 +22,15 @@ LOCAL_CFLAGS := \
+     '-DWEBRTC_TARGET_PC' \
+     '-DWEBRTC_LINUX' \
+     '-DWEBRTC_THREAD_RR' \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
+ 
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++LOCAL_CFLAGS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CPPFLAGS := 
+ LOCAL_LDFLAGS :=
+ LOCAL_C_INCLUDES := \
+diff --git a/src/modules/audio_processing/ns/main/source/Android.mk b/src/modules/audio_processing/ns/main/source/Android.mk
+index 07ec98e..af293ac 100644
+--- a/src/modules/audio_processing/ns/main/source/Android.mk
++++ b/src/modules/audio_processing/ns/main/source/Android.mk
+@@ -25,9 +25,16 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_THREAD_RR'
+ ifeq ($(TARGET_ARCH),arm) 
+ MY_DEFS += \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
+ endif
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/modules/audio_processing/utility/Android.mk b/src/modules/audio_processing/utility/Android.mk
+index 7e758ce..e9d02a3 100644
+--- a/src/modules/audio_processing/utility/Android.mk
++++ b/src/modules/audio_processing/utility/Android.mk
+@@ -26,8 +26,15 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_TARGET_PC' \
+     '-DWEBRTC_LINUX' \
+     '-DWEBRTC_THREAD_RR' \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+diff --git a/src/system_wrappers/source/Android.mk b/src/system_wrappers/source/Android.mk
+index f8e406f..4824aff 100644
+--- a/src/system_wrappers/source/Android.mk
++++ b/src/system_wrappers/source/Android.mk
+@@ -42,8 +42,15 @@ MY_DEFS := '-DNO_TCMALLOC' \
+     '-DWEBRTC_LINUX' \
+     '-DWEBRTC_CLOCK_TYPE_REALTIME' \
+     '-DWEBRTC_THREAD_RR' \
+-    '-DWEBRTC_ANDROID' \
+     '-DANDROID' 
++
++ifneq ($(TARGET_ARCH_VARIANT),armv5te)
++ifneq ($(TARGET_ARCH_VARIANT),armv5te-vfp)
++ MY_DEFS += \
++    '-DWEBRTC_ANDROID'
++endif
++endif
++
+ LOCAL_CFLAGS := $(MY_CFLAGS_C) $(MY_CFLAGS) $(MY_DEFS)
+ 
+ # Include paths placed before CFLAGS/CPPFLAGS
+
+project frameworks/base/
+diff --git a/opengl/include/EGL/eglext.h b/opengl/include/EGL/eglext.h
+index 8034f74..3295e35 100644
+--- a/opengl/include/EGL/eglext.h
++++ b/opengl/include/EGL/eglext.h
+@@ -215,6 +215,17 @@ typedef EGLBoolean (EGLAPIENTRYP PFNEGLSIGNALSYNCNVPROC) (EGLSyncNV sync, EGLenu
+ typedef EGLBoolean (EGLAPIENTRYP PFNEGLGETSYNCATTRIBNVPROC) (EGLSyncNV sync, EGLint attribute, EGLint *value);
+ #endif
+ 
++#ifndef EGL_ANDROID_blob_cache
++#define EGL_ANDROID_blob_cache 1
++typedef khronos_ssize_t EGLsizeiANDROID;
++typedef void (*EGLSetBlobFuncANDROID) (const void *key, EGLsizeiANDROID keySize, const void *value, EGLsizeiANDROID valueSize);
++typedef EGLsizeiANDROID (*EGLGetBlobFuncANDROID) (const void *key, EGLsizeiANDROID keySize, void *value, EGLsizeiANDROID valueSize);
++typedef void (EGLAPIENTRYP PFNEGLSETBLOBCACHEFUNCSANDROIDPROC) (EGLDisplay dpy, EGLSetBlobFuncANDROID set, EGLGetBlobFuncANDROID get);
++#ifdef EGL_EGLEXT_PROTOTYPES
++EGLAPI void EGLAPIENTRY eglSetBlobCacheFuncsANDROID (EGLDisplay dpy, EGLSetBlobFuncANDROID set, EGLGetBlobFuncANDROID get);
++#endif
++#endif /* EGL_ANDROID_blob_cache */
++
+ #ifndef EGL_KHR_fence_sync
+ #define EGL_KHR_fence_sync 1
+ /* Reuses most tokens and entry points from EGL_KHR_reusable_sync */
+@@ -229,20 +240,23 @@ struct ANativeWindowBuffer;
+ #define EGL_NATIVE_BUFFER_ANDROID               0x3140  /* eglCreateImageKHR target */
+ #endif
+ 
+-#ifdef QCOM_HARDWARE
+-#ifndef EGL_EGLEXT_PROTOTYPES
+-#define EGL_EGLEXT_PROTOTYPES 1
++#ifndef EGL_ANDROID_swap_rectangle
++#define EGL_ANDROID_swap_rectangle 1
++#ifdef EGL_EGLEXT_PROTOTYPES
++EGLAPI EGLBoolean EGLAPIENTRY eglSetSwapRectangleANDROID (EGLDisplay dpy, EGLSurface draw, EGLint left, EGLint top, EGLint width, EGLint height);
++#endif /* EGL_EGLEXT_PROTOTYPES */
++typedef EGLBoolean (EGLAPIENTRYP PFNEGLSETSWAPRECTANGLEANDROIDPROC) (EGLDisplay dpy, EGLSurface draw, EGLint left, EGLint top, EGLint width, EGLint height);
+ #endif
+ 
+ #ifndef EGL_ANDROID_get_render_buffer
+ #define EGL_ANDROID_get_render_buffer 1
+ #ifdef EGL_EGLEXT_PROTOTYPES
+ EGLAPI EGLClientBuffer EGLAPIENTRY eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw);
++EGLAPI void* EGLAPIENTRY eglGetComposerANDROID(EGLDisplay dpy, EGLSurface draw);
++
+ #endif
+ typedef EGLClientBuffer (EGLAPIENTRYP PFNEGLGETRENDERBUFFERANDROIDPROC) (EGLDisplay dpy, EGLSurface draw);
+ #endif
+-#endif // QCOM_HARDWARE
+-
+ #ifndef EGL_ANDROID_recordable
+ #define EGL_ANDROID_recordable 1
+ #define EGL_RECORDABLE_ANDROID                  0x3142  /* EGLConfig attribute */
+@@ -262,21 +276,6 @@ typedef EGLuint64NV (EGLAPIENTRYP PFNEGLGETSYSTEMTIMEFREQUENCYNVPROC)(void);
+ typedef EGLuint64NV (EGLAPIENTRYP PFNEGLGETSYSTEMTIMENVPROC)(void);
+ #endif
+ 
+-
+-/* EGL_ANDROID_blob_cache
+- */
+-#ifndef EGL_ANDROID_blob_cache
+-#define EGL_ANDROID_blob_cache 1
+-typedef khronos_ssize_t EGLsizeiANDROID;
+-typedef void (*EGLSetBlobFuncANDROID) (const void* key, EGLsizeiANDROID keySize, const void* value, EGLsizeiANDROID valueSize);
+-typedef EGLsizeiANDROID (*EGLGetBlobFuncANDROID) (const void* key, EGLsizeiANDROID keySize, void* value, EGLsizeiANDROID valueSize);
+-#ifdef EGL_EGLEXT_PROTOTYPES
+-EGLAPI void EGLAPIENTRY eglSetBlobCacheFuncsANDROID(EGLDisplay dpy, EGLSetBlobFuncANDROID set, EGLGetBlobFuncANDROID get);
+-#endif /* EGL_EGLEXT_PROTOTYPES */
+-typedef void (EGLAPIENTRYP PFNEGLSETBLOBCACHEFUNCSANDROIDPROC) (EGLDisplay dpy,
+-        EGLSetBlobFuncANDROID set, EGLGetBlobFuncANDROID get);
+-#endif
+-
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/opengl/libagl/egl.cpp b/opengl/libagl/egl.cpp
+index 4c6d306..be9fb1b 100644
+--- a/opengl/libagl/egl.cpp
++++ b/opengl/libagl/egl.cpp
+@@ -49,11 +49,6 @@
+ #undef NELEM
+ #define NELEM(x) (sizeof(x)/sizeof(*(x)))
+ 
+-
+-EGLBoolean EGLAPI eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
+-        EGLint left, EGLint top, EGLint width, EGLint height);
+-
+-
+ // ----------------------------------------------------------------------------
+ namespace android {
+ // ----------------------------------------------------------------------------
+@@ -165,9 +160,7 @@ struct egl_surface_t
+     virtual     EGLint      getSwapBehavior() const;
+     virtual     EGLBoolean  swapBuffers();
+     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
+-#ifdef QCOM_HARDWARE
+-    virtual     EGLClientBuffer getRenderBuffer() const;
+-#endif
++    virtual     EGLClientBuffer  getRenderBuffer();
+ protected:
+     GGLSurface              depth;
+ };
+@@ -211,11 +204,10 @@ EGLBoolean egl_surface_t::setSwapRectangle(
+ {
+     return EGL_FALSE;
+ }
+-#ifdef QCOM_HARDWARE
+-EGLClientBuffer egl_surface_t::getRenderBuffer() const {
+-    return 0;
++EGLClientBuffer egl_surface_t::getRenderBuffer()
++{
++    return NULL;
+ }
+-#endif
+ 
+ // ----------------------------------------------------------------------------
+ 
+@@ -241,9 +233,7 @@ struct egl_window_surface_v2_t : public egl_surface_t
+     virtual     EGLint      getRefreshRate() const;
+     virtual     EGLint      getSwapBehavior() const;
+     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
+-#ifdef QCOM_HARDWARE
+-    virtual     EGLClientBuffer  getRenderBuffer() const;
+-#endif
++    virtual     EGLClientBuffer  getRenderBuffer();
+     
+ private:
+     status_t lock(ANativeWindowBuffer* buf, int usage, void** vaddr);
+@@ -582,12 +572,11 @@ EGLBoolean egl_window_surface_v2_t::setSwapRectangle(
+     return EGL_TRUE;
+ }
+ 
+-#ifdef QCOM_HARDWARE
+-EGLClientBuffer egl_window_surface_v2_t::getRenderBuffer() const
++EGLClientBuffer egl_window_surface_v2_t::getRenderBuffer()
+ {
+-    return buffer;
++    return const_cast<native_handle*>(buffer->handle);
+ }
+-#endif
++
+ 
+ EGLBoolean egl_window_surface_v2_t::bindDrawSurface(ogles_context_t* gl)
+ {
+@@ -818,9 +807,7 @@ static char const * const gExtensionsString =
+         // "KHR_image_pixmap "
+         "EGL_ANDROID_image_native_buffer "
+         "EGL_ANDROID_swap_rectangle "
+-#ifdef QCOM_HARDWARE
+         "EGL_ANDROID_get_render_buffer "
+-#endif
+         ;
+ 
+ // ----------------------------------------------------------------------------
+@@ -873,10 +860,10 @@ static const extention_map_t gExtentionMap[] = {
+             (__eglMustCastToProperFunctionPointerType)&eglDestroyImageKHR }, 
+     { "eglSetSwapRectangleANDROID", 
+             (__eglMustCastToProperFunctionPointerType)&eglSetSwapRectangleANDROID }, 
+-#ifdef QCOM_HARDWARE
+     { "eglGetRenderBufferANDROID",
+             (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
+-#endif
++    { "eglGetComposerANDROID",
++            (__eglMustCastToProperFunctionPointerType)&eglGetComposerANDROID },        
+ };
+ 
+ /*
+@@ -2103,7 +2090,7 @@ EGLBoolean eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
+     return EGL_TRUE;
+ }
+ 
+-#ifdef QCOM_HARDWARE
++
+ EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+ {
+     if (egl_display_t::is_valid(dpy) == EGL_FALSE)
+@@ -2118,4 +2105,9 @@ EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+     // post the surface
+     return d->getRenderBuffer();
+ }
+-#endif
++
++void* eglGetComposerANDROID(EGLDisplay dpy, EGLSurface draw)
++{
++    return NULL;
++}
++
+diff --git a/opengl/libs/EGL/egl.cpp b/opengl/libs/EGL/egl.cpp
+index 6ad06af..2d3c6be 100644
+--- a/opengl/libs/EGL/egl.cpp
++++ b/opengl/libs/EGL/egl.cpp
+@@ -217,9 +217,9 @@ EGLImageKHR egl_get_image_for_current_context(EGLImageKHR image)
+         return EGL_NO_IMAGE_KHR;
+ 
+     egl_context_t const * const c = get_context(context);
+-    if (c == NULL) // this should never happen, by construction
++    if (c == NULL) // this should never happen
+         return EGL_NO_IMAGE_KHR;
+-
++		
+     egl_display_t* display = egl_display_t::get(c->dpy);
+     if (display == NULL) // this should never happen, by construction
+         return EGL_NO_IMAGE_KHR;
+diff --git a/opengl/libs/EGL/eglApi.cpp b/opengl/libs/EGL/eglApi.cpp
+index 7310093..0ed5516 100644
+--- a/opengl/libs/EGL/eglApi.cpp
++++ b/opengl/libs/EGL/eglApi.cpp
+@@ -49,7 +49,21 @@ using namespace android;
+ 
+ // ----------------------------------------------------------------------------
+ 
+-#define EGL_VERSION_HW_ANDROID  0x3143
++static char const * const sVendorString     = "Android";
++static char const * const sVersionString    = "1.4 Android META-EGL";
++static char const * const sClientApiString  = "OpenGL ES";
++static char const * const sExtensionString  =
++        "EGL_KHR_image "
++        "EGL_KHR_image_base "
++        "EGL_KHR_image_pixmap "
++        "EGL_KHR_gl_texture_2D_image "
++        "EGL_KHR_gl_texture_cubemap_image "
++        "EGL_KHR_gl_renderbuffer_image "
++        "EGL_KHR_fence_sync "
++        "EGL_ANDROID_image_native_buffer "
++        "EGL_ANDROID_swap_rectangle "
++        "EGL_NV_system_time "
++        ;
+ 
+ struct extention_map_t {
+     const char* name;
+@@ -65,14 +79,12 @@ static const extention_map_t sExtentionMap[] = {
+             (__eglMustCastToProperFunctionPointerType)&eglCreateImageKHR },
+     { "eglDestroyImageKHR",
+             (__eglMustCastToProperFunctionPointerType)&eglDestroyImageKHR },
++    { "eglSetSwapRectangleANDROID",
++            (__eglMustCastToProperFunctionPointerType)&eglSetSwapRectangleANDROID },
+     { "eglGetSystemTimeFrequencyNV",
+             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeFrequencyNV },
+     { "eglGetSystemTimeNV",
+             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeNV },
+-#ifdef QCOM_HARDWARE
+-    { "eglGetRenderBufferANDROID",
+-            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
+-#endif
+ };
+ 
+ // accesses protected by sExtensionMapMutex
+@@ -376,11 +388,6 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
+             }
+         }
+ 
+-        // the EGL spec requires that a new EGLSurface default to swap interval
+-        // 1, so explicitly set that on the window here.
+-        ANativeWindow* anw = reinterpret_cast<ANativeWindow*>(window);
+-        anw->setSwapInterval(anw, 1);
+-
+         EGLSurface surface = cnx->egl.eglCreateWindowSurface(
+                 iDpy, iConfig, window, attrib_list);
+         if (surface != EGL_NO_SURFACE) {
+@@ -851,17 +858,10 @@ __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname)
+         return  NULL;
+     }
+ 
+-    // The EGL_ANDROID_blob_cache extension should not be exposed to
+-    // applications.  It is used internally by the Android EGL layer.
+-    if (!strcmp(procname, "eglSetBlobCacheFuncsANDROID")) {
+-        return NULL;
+-    }
+-
+     __eglMustCastToProperFunctionPointerType addr;
+     addr = findProcAddress(procname, sExtentionMap, NELEM(sExtentionMap));
+     if (addr) return addr;
+ 
+-
+     // this protects accesses to sGLExtentionMap and sGLExtentionSlot
+     pthread_mutex_lock(&sExtensionMapMutex);
+ 
+@@ -971,19 +971,13 @@ const char* eglQueryString(EGLDisplay dpy, EGLint name)
+ 
+     switch (name) {
+         case EGL_VENDOR:
+-            return dp->getVendorString();
++            return sVendorString;
+         case EGL_VERSION:
+-            return dp->getVersionString();
++            return sVersionString;
+         case EGL_EXTENSIONS:
+-            return dp->getExtensionString();
++            return sExtensionString;
+         case EGL_CLIENT_APIS:
+-            return dp->getClientApiString();
+-        case EGL_VERSION_HW_ANDROID: {
+-            if (gEGLImpl[IMPL_HARDWARE].dso) {
+-                return dp->disp[IMPL_HARDWARE].queryString.version;
+-            }
+-            return dp->disp[IMPL_SOFTWARE].queryString.version;
+-        }
++            return sClientApiString;
+     }
+     return setError(EGL_BAD_PARAMETER, (const char *)0);
+ }
+@@ -1446,10 +1440,8 @@ EGLBoolean eglGetSyncAttribKHR(EGLDisplay dpy, EGLSyncKHR sync, EGLint attribute
+ // ANDROID extensions
+ // ----------------------------------------------------------------------------
+ 
+-/* ANDROID extensions entry-point go here */
+-
+-#ifdef QCOM_HARDWARE
+-EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
++EGLBoolean eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
++        EGLint left, EGLint top, EGLint width, EGLint height)
+ {
+     clearError();
+ 
+@@ -1457,6 +1449,21 @@ EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+     if (!dp) return EGL_FALSE;
+ 
+     SurfaceRef _s(dp, draw);
++    if (!_s.get())
++        return setError(EGL_BAD_SURFACE, EGL_FALSE);
++
++    egl_surface_t const * const s = get_surface(draw);
++    if (s->cnx->egl.eglSetSwapRectangleANDROID) {
++        return s->cnx->egl.eglSetSwapRectangleANDROID(
++                dp->disp[s->impl].dpy, s->surface, left, top, width, height);
++    }
++    return setError(EGL_BAD_DISPLAY, NULL);
++}
++EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
++{
++    egl_display_t const * const dp = validate_display(dpy);
++	
++    SurfaceRef _s(dp, draw);
+     if (!_s.get()) return setError(EGL_BAD_SURFACE, (EGLClientBuffer*)0);
+ 
+     egl_surface_t const * const s = get_surface(draw);
+@@ -1466,7 +1473,21 @@ EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+     }
+     return setError(EGL_BAD_DISPLAY, (EGLClientBuffer*)0);
+ }
+-#endif
++
++void* eglGetComposerANDROID(EGLDisplay dpy, EGLSurface draw)
++{
++    egl_display_t const * const dp = validate_display(dpy);
++    
++	SurfaceRef _s(dp, draw);
++    if (!_s.get()) return setError(EGL_BAD_SURFACE, (EGLClientBuffer*)0);
++
++    egl_surface_t const * const s = get_surface(draw);
++    if (s->cnx->egl.eglGetComposerANDROID) {
++        return (void*)s->cnx->egl.eglGetComposerANDROID(
++                dp->disp[s->impl].dpy, s->surface);
++    }
++    return setError(EGL_BAD_DISPLAY, (EGLClientBuffer*)0);
++}
+ 
+ // ----------------------------------------------------------------------------
+ // NVIDIA extensions
+diff --git a/opengl/libs/EGL/egl_entries.in b/opengl/libs/EGL/egl_entries.in
+index bdd2a7e..f5d0499 100644
+--- a/opengl/libs/EGL/egl_entries.in
++++ b/opengl/libs/EGL/egl_entries.in
+@@ -62,6 +62,7 @@ EGL_ENTRY(EGLBoolean,   eglGetSyncAttribKHR,    EGLDisplay, EGLSyncKHR, EGLint,
+ 
+ EGL_ENTRY(EGLBoolean, eglSetSwapRectangleANDROID, EGLDisplay, EGLSurface, EGLint, EGLint, EGLint, EGLint)
+ EGL_ENTRY(EGLClientBuffer, eglGetRenderBufferANDROID, EGLDisplay, EGLSurface)
++EGL_ENTRY(void*, eglGetComposerANDROID, EGLDisplay, EGLSurface)
+ 
+ /* NVIDIA extensions */
+ 
+diff --git a/opengl/libs/EGL/getProcAddress.cpp b/opengl/libs/EGL/getProcAddress.cpp
+index f89c865..636627b 100644
+--- a/opengl/libs/EGL/getProcAddress.cpp
++++ b/opengl/libs/EGL/getProcAddress.cpp
+@@ -42,8 +42,12 @@ namespace android {
+             "mrc p15, 0, " #reg ", c13, c0, 3 \n"
+     #else
+         #define GET_TLS(reg) \
++           "push   {r0,r1,r2,r3,lr}                  \n"           \
+             "mov   " #reg ", #0xFFFF0FFF      \n"  \
+-            "ldr   " #reg ", [" #reg ", #-15] \n"
++                       "sub  " #reg "," #reg ",#0x1F     \n"           \
++                       "blx   " #reg "                                   \n"           \
++                       "mov   " #reg ", r0                       \n"           \
++                       "pop    {r0,r1,r2,r3,lr}                  \n"
+     #endif
+ 
+     #define API_ENTRY(_api) __attribute__((naked)) _api
+@@ -51,8 +55,9 @@ namespace android {
+     #define CALL_GL_EXTENSION_API(_api)                         \
+          asm volatile(                                          \
+             GET_TLS(r12)                                        \
+-            "ldr   r12, [r12, %[tls]] \n"                       \
+             "cmp   r12, #0            \n"                       \
++            "ldrne   r12, [r12, %[tls]] \n"                     \
++            "cmpne   r12, #0            \n"                     \
+             "ldrne r12, [r12, %[api]] \n"                       \
+             "cmpne r12, #0            \n"                       \
+             "bxne  r12                \n"                       \
+diff --git a/opengl/libs/GLES2/gl2.cpp b/opengl/libs/GLES2/gl2.cpp
+index 27ec907..ad89b4c 100644
+--- a/opengl/libs/GLES2/gl2.cpp
++++ b/opengl/libs/GLES2/gl2.cpp
+@@ -43,22 +43,17 @@ using namespace android;
+ 
+ #if USE_FAST_TLS_KEY
+ 
+-    #ifdef HAVE_TEGRA_ERRATA_657451
+-        #define MUNGE_TLS(_tls) \
+-            "bfi " #_tls ", " #_tls ", #20, #1 \n" \
+-            "bic " #_tls ", " #_tls ", #1 \n"
+-    #else
+-        #define MUNGE_TLS(_tls) "\n"
+-    #endif
+-
+     #ifdef HAVE_ARM_TLS_REGISTER
+         #define GET_TLS(reg) \
+-            "mrc p15, 0, " #reg ", c13, c0, 3 \n" \
+-            MUNGE_TLS(reg)
++            "mrc p15, 0, " #reg ", c13, c0, 3 \n"
+     #else
+         #define GET_TLS(reg) \
++                       "push   {r0,r1,r2,r3,lr}                  \n"           \
+             "mov   " #reg ", #0xFFFF0FFF      \n"  \
+-            "ldr   " #reg ", [" #reg ", #-15] \n"
++                       "sub  " #reg "," #reg ",#0x1F     \n"           \
++                       "blx   " #reg "                                   \n"           \
++                       "mov   " #reg ", r0                       \n"           \
++                       "pop    {r0,r1,r2,r3,lr}                  \n"
+     #endif
+ 
+     #define API_ENTRY(_api) __attribute__((naked)) _api
+@@ -66,8 +61,9 @@ using namespace android;
+     #define CALL_GL_API(_api, ...)                              \
+          asm volatile(                                          \
+             GET_TLS(r12)                                        \
+-            "ldr   r12, [r12, %[tls]] \n"                       \
+             "cmp   r12, #0            \n"                       \
++            "ldrne   r12, [r12, %[tls]] \n"                     \
++            "cmpne   r12, #0            \n"                     \
+             "ldrne pc,  [r12, %[api]] \n"                       \
+             "mov   r0, #0             \n"                       \
+             "bx    lr                 \n"                       \
+diff --git a/opengl/libs/GLES_CM/gl.cpp b/opengl/libs/GLES_CM/gl.cpp
+index b62515b..5dabdf4 100644
+--- a/opengl/libs/GLES_CM/gl.cpp
++++ b/opengl/libs/GLES_CM/gl.cpp
+@@ -97,22 +97,17 @@ GL_API void GL_APIENTRY glWeightPointerOESBounds(GLint size, GLenum type,
+ 
+ #if USE_FAST_TLS_KEY && !CHECK_FOR_GL_ERRORS
+ 
+-    #ifdef HAVE_TEGRA_ERRATA_657451
+-        #define MUNGE_TLS(_tls) \
+-            "bfi " #_tls ", " #_tls ", #20, #1 \n" \
+-            "bic " #_tls ", " #_tls ", #1 \n"
+-    #else
+-        #define MUNGE_TLS(_tls) "\n"
+-    #endif
+-
+     #ifdef HAVE_ARM_TLS_REGISTER
+         #define GET_TLS(reg) \
+-            "mrc p15, 0, " #reg ", c13, c0, 3 \n" \
+-            MUNGE_TLS(reg)
++            "mrc p15, 0, " #reg ", c13, c0, 3 \n"
+     #else
+         #define GET_TLS(reg) \
++                       "push   {r0,r1,r2,r3,lr}                  \n"           \
+             "mov   " #reg ", #0xFFFF0FFF      \n"  \
+-            "ldr   " #reg ", [" #reg ", #-15] \n"
++                       "sub  " #reg "," #reg ",#0x1F     \n"           \
++                       "blx   " #reg "                                   \n"           \
++                       "mov   " #reg ", r0                       \n"           \
++                       "pop    {r0,r1,r2,r3,lr}                  \n"
+     #endif
+ 
+     #define API_ENTRY(_api) __attribute__((naked)) _api
+@@ -120,8 +115,9 @@ GL_API void GL_APIENTRY glWeightPointerOESBounds(GLint size, GLenum type,
+     #define CALL_GL_API(_api, ...)                              \
+          asm volatile(                                          \
+             GET_TLS(r12)                                        \
+-            "ldr   r12, [r12, %[tls]] \n"                       \
+             "cmp   r12, #0            \n"                       \
++            "ldrne   r12, [r12, %[tls]] \n"                     \
++            "cmpne   r12, #0            \n"                     \
+             "ldrne pc,  [r12, %[api]] \n"                       \
+             "mov   r0, #0             \n"                       \
+             "bx    lr                 \n"                       \
+diff --git a/services/input/InputReader.cpp b/services/input/InputReader.cpp
+index d9290f4..844b17e 100644
+--- a/services/input/InputReader.cpp
++++ b/services/input/InputReader.cpp
+@@ -645,7 +645,7 @@ int32_t InputReader::getStateLocked(int32_t deviceId, uint32_t sourceMask, int32
+             InputDevice* device = mDevices.valueAt(i);
+             if (! device->isIgnored() && sourcesMatchMask(device->getSources(), sourceMask)) {
+                 result = (device->*getStateFunc)(sourceMask, code);
+-                if (result >= AKEY_STATE_UP) {
++                if (result >= AKEY_STATE_DOWN) {
+                     return result;
+                 }
+             }
+@@ -1006,7 +1006,7 @@ int32_t InputDevice::getState(uint32_t sourceMask, int32_t code, GetStateFunc ge
+         InputMapper* mapper = mMappers[i];
+         if (sourcesMatchMask(mapper->getSources(), sourceMask)) {
+             result = (mapper->*getStateFunc)(sourceMask, code);
+-            if (result >= AKEY_STATE_UP) {
++            if (result >= AKEY_STATE_DOWN) {
+                 return result;
+             }
+         }
+@@ -1295,12 +1295,6 @@ void TouchButtonAccumulator::process(const RawEvent* rawEvent) {
+             break;
+         }
+     }
+-#ifdef LEGACY_TOUCHSCREEN
+-    // set true to mBtnTouch by multi-touch event with pressure more than zero
+-    // some touchscreen driver which has BTN_TOUCH feature doesn't send BTN_TOUCH event
+-    else if (rawEvent->type == EV_ABS && rawEvent->scanCode == ABS_MT_TOUCH_MAJOR && rawEvent->value > 0)
+-        mBtnTouch = true;
+-#endif
+ }
+ 
+ uint32_t TouchButtonAccumulator::getButtonState() const {
+@@ -1576,12 +1570,7 @@ void MultiTouchMotionAccumulator::process(const RawEvent* rawEvent) {
+                 break;
+             case ABS_MT_TOUCH_MAJOR:
+                 slot->mInUse = true;
+-#ifdef LEGACY_TOUCHSCREEN
+-                // emulate ABS_MT_PRESSURE
+-                slot->mAbsMTPressure = rawEvent->value;
+-#else
+                 slot->mAbsMTTouchMajor = rawEvent->value;
+-#endif
+                 break;
+             case ABS_MT_TOUCH_MINOR:
+                 slot->mInUse = true;
+@@ -1590,12 +1579,7 @@ void MultiTouchMotionAccumulator::process(const RawEvent* rawEvent) {
+                 break;
+             case ABS_MT_WIDTH_MAJOR:
+                 slot->mInUse = true;
+-#ifdef LEGACY_TOUCHSCREEN
+-                // emulate ABS_MT_TOUCH_MAJOR
+-                slot->mAbsMTTouchMajor = rawEvent->value;
+-#else
+                 slot->mAbsMTWidthMajor = rawEvent->value;
+-#endif
+                 break;
+             case ABS_MT_WIDTH_MINOR:
+                 slot->mInUse = true;
+@@ -1632,12 +1616,6 @@ void MultiTouchMotionAccumulator::process(const RawEvent* rawEvent) {
+             }
+         }
+     } else if (rawEvent->type == EV_SYN && rawEvent->scanCode == SYN_MT_REPORT) {
+-#ifdef LEGACY_TOUCHSCREEN
+-        // don't use the slot with pressure less than or qeual to zero
+-        // some touchscreen driver sends multi-touch event for not-in-use pointer
+-        if (mSlots[mCurrentSlot].mAbsMTPressure <= 0)
+-            mSlots[mCurrentSlot].mInUse = false;
+-#endif
+         // MultiTouch Sync: The driver has returned all data for *one* of the pointers.
+         mCurrentSlot += 1;
+     }
+@@ -1802,7 +1780,6 @@ void KeyboardInputMapper::populateDeviceInfo(InputDeviceInfo* info) {
+     InputMapper::populateDeviceInfo(info);
+ 
+     info->setKeyboardType(mKeyboardType);
+-    info->setKeyCharacterMapFile(getEventHub()->getKeyCharacterMapFile(getDeviceId()));
+ }
+ 
+ void KeyboardInputMapper::dump(String8& dump) {
+@@ -2197,13 +2174,6 @@ void CursorInputMapper::process(const RawEvent* rawEvent) {
+     if (rawEvent->type == EV_SYN && rawEvent->scanCode == SYN_REPORT) {
+         sync(rawEvent->when);
+     }
+-#ifdef LEGACY_TRACKPAD
+-    // sync now since BTN_MOUSE is not necessarily followed by SYN_REPORT and
+-    // we need to ensure that we report the up/down promptly.
+-    else if (rawEvent->type == EV_KEY && rawEvent->scanCode == BTN_MOUSE) {
+-        sync(rawEvent->when);
+-    }
+-#endif
+ }
+ 
+ void CursorInputMapper::sync(nsecs_t when) {
+@@ -2528,8 +2498,7 @@ void TouchInputMapper::configure(nsecs_t when,
+     bool resetNeeded = false;
+     if (!changes || (changes & (InputReaderConfiguration::CHANGE_DISPLAY_INFO
+             | InputReaderConfiguration::CHANGE_POINTER_GESTURE_ENABLEMENT
+-            | InputReaderConfiguration::CHANGE_SHOW_TOUCHES
+-            | InputReaderConfiguration::CHANGE_STYLUS_ICON_ENABLED))) {
++            | InputReaderConfiguration::CHANGE_SHOW_TOUCHES))) {
+         // Configure device sources, surface dimensions, orientation and
+         // scaling factors.
+         configureSurface(when, &resetNeeded);
+@@ -2572,9 +2541,12 @@ void TouchInputMapper::configureParameters() {
+         // The device is a cursor device with a touch pad attached.
+         // By default don't use the touch pad to move the pointer.
+         mParameters.deviceType = Parameters::DEVICE_TYPE_TOUCH_PAD;
++		LOGE(" DEVICE_TYPE_TOUCH_PAD");
+     } else {
+         // The device is a touch pad of unknown purpose.
+-        mParameters.deviceType = Parameters::DEVICE_TYPE_POINTER;
++        //mParameters.deviceType = Parameters::DEVICE_TYPE_POINTER;
++		mParameters.deviceType = Parameters::DEVICE_TYPE_TOUCH_SCREEN;
++        LOGE(" DEVICE_TYPE_POINTER - modded to TOUCH_SCREEN");
+     }
+ 
+     String8 deviceTypeString;
+@@ -2909,7 +2881,7 @@ void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
+             mOrientedRanges.distance.min =
+                     mRawPointerAxes.distance.minValue * mDistanceScale;
+             mOrientedRanges.distance.max =
+-                    mRawPointerAxes.distance.maxValue * mDistanceScale;
++                    mRawPointerAxes.distance.minValue * mDistanceScale;
+             mOrientedRanges.distance.flat = 0;
+             mOrientedRanges.distance.fuzz =
+                     mRawPointerAxes.distance.fuzz * mDistanceScale;
+@@ -4020,7 +3992,7 @@ void TouchInputMapper::dispatchPointerGestures(nsecs_t when, uint32_t policyFlag
+                 && (mPointerGesture.lastGestureMode == PointerGesture::SWIPE
+                         || mPointerGesture.lastGestureMode == PointerGesture::FREEFORM)) {
+             // Remind the user of where the pointer is after finishing a gesture with spots.
+-            unfadePointer(PointerControllerInterface::TRANSITION_GRADUAL);
++            mPointerController->unfade(PointerControllerInterface::TRANSITION_GRADUAL);
+         }
+         break;
+     case PointerGesture::TAP:
+@@ -4030,7 +4002,7 @@ void TouchInputMapper::dispatchPointerGestures(nsecs_t when, uint32_t policyFlag
+     case PointerGesture::PRESS:
+         // Unfade the pointer when the current gesture manipulates the
+         // area directly under the pointer.
+-        unfadePointer(PointerControllerInterface::TRANSITION_IMMEDIATE);
++        mPointerController->unfade(PointerControllerInterface::TRANSITION_IMMEDIATE);
+         break;
+     case PointerGesture::SWIPE:
+     case PointerGesture::FREEFORM:
+@@ -4039,7 +4011,7 @@ void TouchInputMapper::dispatchPointerGestures(nsecs_t when, uint32_t policyFlag
+         if (mParameters.gestureMode == Parameters::GESTURE_MODE_SPOTS) {
+             mPointerController->fade(PointerControllerInterface::TRANSITION_GRADUAL);
+         } else {
+-            unfadePointer(PointerControllerInterface::TRANSITION_IMMEDIATE);
++            mPointerController->unfade(PointerControllerInterface::TRANSITION_IMMEDIATE);
+         }
+         break;
+     }
+@@ -4991,7 +4963,6 @@ void TouchInputMapper::dispatchPointerStylus(nsecs_t when, uint32_t policyFlags)
+         mPointerSimple.currentProperties.id = 0;
+         mPointerSimple.currentProperties.toolType =
+                 mCurrentCookedPointerData.pointerProperties[index].toolType;
+-        mLastStylusTime = when;
+     } else {
+         down = false;
+         hovering = false;
+@@ -5068,17 +5039,12 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
+             mPointerController->setPresentation(PointerControllerInterface::PRESENTATION_POINTER);
+             mPointerController->clearSpots();
+             mPointerController->setButtonState(mCurrentButtonState);
+-            unfadePointer(PointerControllerInterface::TRANSITION_IMMEDIATE);
++            mPointerController->unfade(PointerControllerInterface::TRANSITION_IMMEDIATE);
+         } else if (!down && !hovering && (mPointerSimple.down || mPointerSimple.hovering)) {
+             mPointerController->fade(PointerControllerInterface::TRANSITION_GRADUAL);
+         }
+     }
+ 
+-    if (rejectPalm(when)) {     // stylus is currently active
+-        mPointerSimple.reset();
+-        return;
+-    }
+-
+     if (mPointerSimple.down && !down) {
+         mPointerSimple.down = false;
+ 
+@@ -5189,9 +5155,6 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
+         const PointerProperties* properties, const PointerCoords* coords,
+         const uint32_t* idToIndex, BitSet32 idBits,
+         int32_t changedId, float xPrecision, float yPrecision, nsecs_t downTime) {
+-
+-    if (rejectPalm(when)) return;
+-
+     PointerCoords pointerCoords[MAX_POINTERS];
+     PointerProperties pointerProperties[MAX_POINTERS];
+     uint32_t pointerCount = 0;
+@@ -5264,20 +5227,6 @@ void TouchInputMapper::fadePointer() {
+     }
+ }
+ 
+-void TouchInputMapper::unfadePointer(PointerControllerInterface::Transition transition) {
+-    if (mPointerController != NULL &&
+-            !(mPointerUsage == POINTER_USAGE_STYLUS && !mConfig.stylusIconEnabled)) {
+-        mPointerController->unfade(transition);
+-    }
+-}
+-
+-nsecs_t TouchInputMapper::mLastStylusTime = 0;
+-
+-bool TouchInputMapper::rejectPalm(nsecs_t when) {
+-  return (when - mLastStylusTime < mConfig.stylusPalmRejectionTime) &&
+-    mPointerSimple.currentProperties.toolType != AMOTION_EVENT_TOOL_TYPE_STYLUS;
+-}
+-
+ bool TouchInputMapper::isPointInsideSurface(int32_t x, int32_t y) {
+     return x >= mRawPointerAxes.x.minValue && x <= mRawPointerAxes.x.maxValue
+             && y >= mRawPointerAxes.y.minValue && y <= mRawPointerAxes.y.maxValue;
+@@ -5721,20 +5670,12 @@ void MultiTouchInputMapper::configureRawPointerAxes() {
+ 
+     getAbsoluteAxisInfo(ABS_MT_POSITION_X, &mRawPointerAxes.x);
+     getAbsoluteAxisInfo(ABS_MT_POSITION_Y, &mRawPointerAxes.y);
+-#ifdef LEGACY_TOUCHSCREEN
+-    getAbsoluteAxisInfo(ABS_MT_WIDTH_MAJOR, &mRawPointerAxes.touchMajor);
+-#else
+     getAbsoluteAxisInfo(ABS_MT_TOUCH_MAJOR, &mRawPointerAxes.touchMajor);
+-#endif
+     getAbsoluteAxisInfo(ABS_MT_TOUCH_MINOR, &mRawPointerAxes.touchMinor);
+     getAbsoluteAxisInfo(ABS_MT_WIDTH_MAJOR, &mRawPointerAxes.toolMajor);
+     getAbsoluteAxisInfo(ABS_MT_WIDTH_MINOR, &mRawPointerAxes.toolMinor);
+     getAbsoluteAxisInfo(ABS_MT_ORIENTATION, &mRawPointerAxes.orientation);
+-#ifdef LEGACY_TOUCHSCREEN
+-    getAbsoluteAxisInfo(ABS_MT_TOUCH_MAJOR, &mRawPointerAxes.pressure);
+-#else
+     getAbsoluteAxisInfo(ABS_MT_PRESSURE, &mRawPointerAxes.pressure);
+-#endif
+     getAbsoluteAxisInfo(ABS_MT_DISTANCE, &mRawPointerAxes.distance);
+     getAbsoluteAxisInfo(ABS_MT_TRACKING_ID, &mRawPointerAxes.trackingId);
+     getAbsoluteAxisInfo(ABS_MT_SLOT, &mRawPointerAxes.slot);
+diff --git a/services/surfaceflinger/Android.mk b/services/surfaceflinger/Android.mk
+index 3731484..53502db 100644
+--- a/services/surfaceflinger/Android.mk
++++ b/services/surfaceflinger/Android.mk
+@@ -1,10 +1,6 @@
+ LOCAL_PATH:= $(call my-dir)
+ include $(CLEAR_VARS)
+ 
+-ifeq ($(BOARD_HAVE_CODEC_SUPPORT),SAMSUNG_CODEC_SUPPORT)
+-LOCAL_CFLAGS     += -DSAMSUNG_CODEC_SUPPORT
+-endif
+-
+ LOCAL_SRC_FILES:= \
+     Layer.cpp 								\
+     LayerBase.cpp 							\
+@@ -18,7 +14,8 @@ LOCAL_SRC_FILES:= \
+     MessageQueue.cpp 						\
+     SurfaceFlinger.cpp 						\
+     SurfaceTextureLayer.cpp 				\
+-    Transform.cpp
++    Transform.cpp 							\
++    
+ 
+ LOCAL_CFLAGS:= -DLOG_TAG=\"SurfaceFlinger\"
+ LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
+@@ -30,10 +27,14 @@ ifeq ($(TARGET_BOARD_PLATFORM), omap4)
+ 	LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY
+ endif
+ ifeq ($(TARGET_BOARD_PLATFORM), s5pc110)
+-	LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY -DNEVER_DEFAULT_TO_ASYNC_MODE -DSURFACEFLINGER_FORCE_SCREEN_RELEASE
+-	LOCAL_CFLAGS += -DREFRESH_RATE=56
++	LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY -DNEVER_DEFAULT_TO_ASYNC_MODE
++endif
++
++ifneq (,$(findstring $(TARGET_DEVICE),tuna toro maguro))
++	LOCAL_CFLAGS += -DREFRESH_RATE=59
+ endif
+ 
++
+ LOCAL_SHARED_LIBRARIES := \
+ 	libcutils \
+ 	libhardware \
+@@ -47,36 +48,11 @@ LOCAL_SHARED_LIBRARIES := \
+ # this is only needed for DDMS debugging
+ LOCAL_SHARED_LIBRARIES += libdvm libandroid_runtime
+ 
+-ifeq ($(BOARD_USES_LGE_HDMI_ROTATION),true)
+-LOCAL_CFLAGS += -DUSE_LGE_HDMI
+-LOCAL_SHARED_LIBRARIES += \
+-	libnvdispmgr_d
+-endif
+-
+-ifeq ($(BOARD_ADRENO_DECIDE_TEXTURE_TARGET),true)
+-    LOCAL_CFLAGS += -DDECIDE_TEXTURE_TARGET
+-endif
+-
+ LOCAL_C_INCLUDES := \
+ 	$(call include-path-for, corecg graphics)
+ 
+ LOCAL_C_INCLUDES += hardware/libhardware/modules/gralloc
+ 
+-ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
+-ifeq ($(TARGET_HAVE_BYPASS),true)
+-    LOCAL_CFLAGS += -DBUFFER_COUNT_SERVER=3
+-else
+-    LOCAL_CFLAGS += -DBUFFER_COUNT_SERVER=2
+-endif
+-
+-LOCAL_SHARED_LIBRARIES += \
+-	libQcomUI
+-LOCAL_C_INCLUDES += hardware/qcom/display/libqcomui
+-ifeq ($(TARGET_QCOM_HDMI_OUT),true)
+-LOCAL_CFLAGS += -DQCOM_HDMI_OUT
+-endif
+-endif
+-
+ LOCAL_MODULE:= libsurfaceflinger
+ 
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/services/surfaceflinger/DisplayHardware/DisplayHardware.cpp b/services/surfaceflinger/DisplayHardware/DisplayHardware.cpp
+old mode 100755
+new mode 100644
+index c71328b..1f6e7dc
+--- a/services/surfaceflinger/DisplayHardware/DisplayHardware.cpp
++++ b/services/surfaceflinger/DisplayHardware/DisplayHardware.cpp
+@@ -53,7 +53,7 @@ void checkGLErrors()
+         GLenum error = glGetError();
+         if (error == GL_NO_ERROR)
+             break;
+-        LOGE("GL error 0x%04x", int(error));
++//        LOGE("GL error 0x%04x", int(error));
+     } while(true);
+ }
+ 
+@@ -111,10 +111,12 @@ static status_t selectConfigForPixelFormat(
+     eglGetConfigs(dpy, NULL, 0, &numConfigs);
+     EGLConfig* const configs = new EGLConfig[numConfigs];
+     eglChooseConfig(dpy, attrs, configs, numConfigs, &n);
++LOGE("eglChooseConfig %d",n);
+     for (int i=0 ; i<n ; i++) {
+         EGLint nativeVisualId = 0;
+         eglGetConfigAttrib(dpy, configs[i], EGL_NATIVE_VISUAL_ID, &nativeVisualId);
+-        if (nativeVisualId>0 && format == nativeVisualId) {
++        LOGE("get attrib %d %d",format,nativeVisualId);
++	if (nativeVisualId>0 && format == nativeVisualId) {
+             *outConfig = configs[i];
+             delete [] configs;
+             return NO_ERROR;
+@@ -173,17 +175,6 @@ void DisplayHardware::init(uint32_t dpy)
+             LOGW("H/W composition disabled");
+             attribs[2] = EGL_CONFIG_CAVEAT;
+             attribs[3] = EGL_SLOW_CONFIG;
+-#ifdef QCOM_HARDWARE
+-        } else {
+-            // We have hardware composition enabled. Check the composition type
+-            if (property_get("debug.composition.type", property, NULL) > 0) {
+-                if ((strncmp(property, "c2d", 3) == 0) ||
+-                    (strncmp(property, "dyn", 3) == 0))
+-                    mFlags |= C2D_COMPOSITION;
+-                else if ((strncmp(property, "mdp", 3)) == 0)
+-                    mFlags |= MDP_COMPOSITION;
+-            }
+-#endif
+         }
+     }
+ 
+@@ -195,12 +186,8 @@ void DisplayHardware::init(uint32_t dpy)
+     eglGetConfigs(display, NULL, 0, &numConfigs);
+ 
+     EGLConfig config = NULL;
+-#ifdef FORCE_EGL_CONFIG
+-    config = (EGLConfig)FORCE_EGL_CONFIG;
+-#else
+     err = selectConfigForPixelFormat(display, attribs, format, &config);
+     LOGE_IF(err, "couldn't find an EGLConfig matching the screen format");
+-#endif
+     
+     EGLint r,g,b,a;
+     eglGetConfigAttrib(display, config, EGL_RED_SIZE,   &r);
+@@ -299,6 +286,22 @@ void DisplayHardware::init(uint32_t dpy)
+     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &mMaxTextureSize);
+     glGetIntegerv(GL_MAX_VIEWPORT_DIMS, mMaxViewportDims);
+ 
++
++#ifdef EGL_ANDROID_swap_rectangle
++    if (extensions.hasExtension("EGL_ANDROID_swap_rectangle")) {
++        if (eglSetSwapRectangleANDROID(display, surface,
++                0, 0, mWidth, mHeight) == EGL_TRUE) {
++            // This could fail if this extension is not supported by this
++            // specific surface (of config)
++            mFlags |= SWAP_RECTANGLE;
++        }
++    }
++    // when we have the choice between PARTIAL_UPDATES and SWAP_RECTANGLE
++    // choose PARTIAL_UPDATES, which should be more efficient
++    if (mFlags & PARTIAL_UPDATES)
++        mFlags &= ~SWAP_RECTANGLE;
++#endif
++
+     LOGI("EGL informations:");
+     LOGI("# of configs : %d", numConfigs);
+     LOGI("vendor    : %s", extensions.getEglVendor());
+@@ -317,7 +320,7 @@ void DisplayHardware::init(uint32_t dpy)
+     LOGI("flags = %08x", mFlags);
+ 
+     // Unbind the context from this thread
+-    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++   // eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+ 
+ 
+     // initialize the H/W composer
+@@ -394,10 +397,6 @@ void DisplayHardware::flip(const Region& dirty) const
+     if (mHwc->initCheck() == NO_ERROR) {
+         mHwc->commit();
+     } else {
+-#ifdef STE_HARDWARE
+-        // Make sure the swapbuffer call is done in sync
+-        mNativeWindow->compositionComplete();
+-#endif
+         eglSwapBuffers(dpy, surface);
+     }
+     checkEGLErrors("eglSwapBuffers");
+@@ -421,10 +420,3 @@ void DisplayHardware::dump(String8& res) const
+ {
+     mNativeWindow->dump(res);
+ }
+-
+-#ifdef QCOM_HDMI_OUT
+-void DisplayHardware::orientationChanged(int orientation) const
+-{
+-    mNativeWindow->orientationChanged(EVENT_ORIENTATION_CHANGE, orientation);
+-}
+-#endif
+
+project hardware/libhardware/
+diff --git a/include/hardware/fb.h b/include/hardware/fb.h
+index d39c136..a39bbf6 100644
+--- a/include/hardware/fb.h
++++ b/include/hardware/fb.h
+@@ -63,15 +63,11 @@ typedef struct framebuffer_device_t {
+ 
+     /* max swap interval supported by this framebuffer */
+     const int       maxSwapInterval;
++    
++    const int       smem_start;
++    const int       vmem_start;
+ 
+-#ifdef QCOM_HARDWARE
+-    /* number of framebuffers */
+-    const int       numFramebuffers;
+-
+-    int reserved[7];
+-#else
+     int reserved[8];
+-#endif
+ 
+     /*
+      * requests a specific swap-interval (same definition than EGL)
+@@ -133,10 +129,6 @@ typedef struct framebuffer_device_t {
+ 
+     int (*compositionComplete)(struct framebuffer_device_t* dev);
+ 
+-#ifdef QCOM_HARDWARE
+-    int (*lockBuffer) (struct framebuffer_device_t* dev, int);
+-#endif
+-
+     /*
+      * This hook is OPTIONAL.
+      *
+@@ -152,20 +144,7 @@ typedef struct framebuffer_device_t {
+      */
+     int (*enableScreen)(struct framebuffer_device_t* dev, int enable);
+ 
+-#ifdef QCOM_HARDWARE
+-    int (*dequeueBuffer) (struct framebuffer_device_t* dev, int);
+-
+-    /*
+-     * (*perform)() is used to inform custom event to fb device
+-     * event - Type of event
+-     * val1 - associated with event
+-     * val2 - additional value(if any) associated with event
+-     */
+-    int (*perform) (struct framebuffer_device_t* dev, int event, int value);
+-
+-#else
+     void* reserved_proc[6];
+-#endif
+ 
+ } framebuffer_device_t;
+ 
+diff --git a/modules/gralloc/Android.mk b/modules/gralloc/Android.mk
+index b24c4cd..ac190bc 100644
+--- a/modules/gralloc/Android.mk
++++ b/modules/gralloc/Android.mk
+@@ -15,19 +15,24 @@
+ 
+ LOCAL_PATH := $(call my-dir)
+ 
+-# HAL module implemenation stored in
++# HAL module implemenation, not prelinked and stored in
+ # hw/<OVERLAY_HARDWARE_MODULE_ID>.<ro.product.board>.so
+ include $(CLEAR_VARS)
+-
++LOCAL_PRELINK_MODULE := false
+ LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+-LOCAL_SHARED_LIBRARIES := liblog libcutils
++LOCAL_SHARED_LIBRARIES := liblog libcutils libv3d
+ 
+-LOCAL_SRC_FILES := 	\
+-	gralloc.cpp 	\
+-	framebuffer.cpp \
+-	mapper.cpp
++LOCAL_SRC_FILES := gralloc.cpp framebuffer.cpp mapper.cpp
+ 	
+ LOCAL_MODULE := gralloc.default
+ LOCAL_CFLAGS:= -DLOG_TAG=\"gralloc\"
+ 
++LOCAL_CFLAGS+= -DLCD_PARTIAL_UPDATES_ENABLED=true
++ifeq ($(BOARD_NO_PAGE_FLIPPING),true)
++	LOCAL_CFLAGS += -DNO_PAGE_FLIPPING
++endif
++
++
++LOCAL_C_INCLUDES += brcm_usrlib/dag/v3d_library/inc
++
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/modules/gralloc/framebuffer.cpp b/modules/gralloc/framebuffer.cpp
+index f908976..3c9d0d5 100644
+--- a/modules/gralloc/framebuffer.cpp
++++ b/modules/gralloc/framebuffer.cpp
+@@ -43,7 +43,12 @@
+ /*****************************************************************************/
+ 
+ // numbers of buffers for page flipping
++#if defined(NO_PAGE_FLIPPING)
++// page-flipping is buggy on some devices
++#define NUM_BUFFERS 1
++#else
+ #define NUM_BUFFERS 2
++#endif
+ 
+ 
+ enum {
+@@ -171,6 +176,21 @@ int mapFrameBufferLocked(struct private_module_t* module)
+     info.yoffset = 0;
+     info.activate = FB_ACTIVATE_NOW;
+ 
++#if defined(NO_32BPP)
++    /*
++     * Explicitly request 5/6/5
++     */
++    info.bits_per_pixel = 16;
++    info.red.offset     = 11;
++    info.red.length     = 5;
++    info.green.offset   = 5;
++    info.green.length   = 6;
++    info.blue.offset    = 0;
++    info.blue.length    = 5;
++    info.transp.offset  = 0;
++    info.transp.length  = 0;
++#endif
++
+     /*
+      * Request NUM_BUFFERS screens (at lest 2 for page flipping)
+      */
+@@ -284,6 +304,9 @@ int mapFrameBufferLocked(struct private_module_t* module)
+         return -errno;
+     }
+     module->framebuffer->base = intptr_t(vaddr);
++
++	module->smem_start = (int)finfo.smem_start;
++	module->vmem_start = (int)vaddr;
+     memset(vaddr, 0, fbSize);
+     return 0;
+ }
+@@ -328,25 +351,34 @@ int fb_device_open(hw_module_t const* module, const char* name,
+         dev->device.common.close = fb_close;
+         dev->device.setSwapInterval = fb_setSwapInterval;
+         dev->device.post            = fb_post;
++#if LCD_PARTIAL_UPDATES_ENABLED == true
++        dev->device.setUpdateRect = fb_setUpdateRect;
++#else
+         dev->device.setUpdateRect = 0;
++#endif
+ 
+         private_module_t* m = (private_module_t*)module;
+         status = mapFrameBuffer(m);
+         if (status >= 0) {
+             int stride = m->finfo.line_length / (m->info.bits_per_pixel >> 3);
+             int format = (m->info.bits_per_pixel == 32)
+-                         ? HAL_PIXEL_FORMAT_RGBX_8888
++                         ? HAL_PIXEL_FORMAT_BGRA_8888
+                          : HAL_PIXEL_FORMAT_RGB_565;
++#ifdef NO_32BPP
++            format = HAL_PIXEL_FORMAT_RGB_565;
++#endif
+             const_cast<uint32_t&>(dev->device.flags) = 0;
+             const_cast<uint32_t&>(dev->device.width) = m->info.xres;
+             const_cast<uint32_t&>(dev->device.height) = m->info.yres;
+             const_cast<int&>(dev->device.stride) = stride;
+-            const_cast<int&>(dev->device.format) = format;
++	    const_cast<int&>(dev->device.format) = format;
+             const_cast<float&>(dev->device.xdpi) = m->xdpi;
+             const_cast<float&>(dev->device.ydpi) = m->ydpi;
+             const_cast<float&>(dev->device.fps) = m->fps;
+             const_cast<int&>(dev->device.minSwapInterval) = 1;
+             const_cast<int&>(dev->device.maxSwapInterval) = 1;
++            const_cast<int&>(dev->device.smem_start) = m->smem_start;
++            const_cast<int&>(dev->device.vmem_start) = m->vmem_start;
+             *device = &dev->device.common;
+         }
+     }
+diff --git a/modules/gralloc/gr.h b/modules/gralloc/gr.h
+index 3a43aa7..96c192a 100644
+--- a/modules/gralloc/gr.h
++++ b/modules/gralloc/gr.h
+@@ -41,7 +41,6 @@ inline size_t roundUpToPageSize(size_t x) {
+ }
+ 
+ int mapFrameBufferLocked(struct private_module_t* module);
+-int terminateBuffer(gralloc_module_t const* module, private_handle_t* hnd);
+ int mapBuffer(gralloc_module_t const* module, private_handle_t* hnd);
+ 
+ /*****************************************************************************/
+diff --git a/modules/gralloc/gralloc.cpp b/modules/gralloc/gralloc.cpp
+index 9a0259b..db862ba 100644
+--- a/modules/gralloc/gralloc.cpp
++++ b/modules/gralloc/gralloc.cpp
+@@ -37,15 +37,21 @@
+ #include "gralloc_priv.h"
+ #include "gr.h"
+ 
++#include "ghw_allocator.h"
++#include <linux/android_pmem.h>
++
++using namespace ghw;
+ /*****************************************************************************/
+ 
+ struct gralloc_context_t {
+     alloc_device_t  device;
+     /* our private data here */
++    GhwMemAllocator* allocator;
++    int gemem_master;
+ };
+ 
+ static int gralloc_alloc_buffer(alloc_device_t* dev,
+-        size_t size, int usage, buffer_handle_t* pHandle);
++        size_t size, int usage, buffer_handle_t* pHandle,int w,int h,int format,int stride,int hstride);
+ 
+ /*****************************************************************************/
+ 
+@@ -60,7 +66,7 @@ extern int gralloc_lock(gralloc_module_t const* module,
+         int l, int t, int w, int h,
+         void** vaddr);
+ 
+-extern int gralloc_unlock(gralloc_module_t const* module, 
++extern int gralloc_unlock(gralloc_module_t const* module,
+         buffer_handle_t handle);
+ 
+ extern int gralloc_register_buffer(gralloc_module_t const* module,
+@@ -69,19 +75,6 @@ extern int gralloc_register_buffer(gralloc_module_t const* module,
+ extern int gralloc_unregister_buffer(gralloc_module_t const* module,
+         buffer_handle_t handle);
+ 
+-#ifdef EXYNOS4210_ENHANCEMENTS
+-static int gralloc_getphys(gralloc_module_t const* module, buffer_handle_t handle, void** paddr)
+-{
+-    /*
+-    private_handle_t* hnd = (private_handle_t*)handle;
+-    paddr[0] = (void*)hnd->paddr;
+-    paddr[1] = (void*)(hnd->paddr + hnd->uoffset);
+-    paddr[2] = (void*)(hnd->paddr + hnd->uoffset + hnd->voffset);
+-    */
+-    return 0;
+-}
+-#endif
+-
+ /*****************************************************************************/
+ 
+ static struct hw_module_methods_t gralloc_module_methods = {
+@@ -103,9 +96,6 @@ struct private_module_t HAL_MODULE_INFO_SYM = {
+         unregisterBuffer: gralloc_unregister_buffer,
+         lock: gralloc_lock,
+         unlock: gralloc_unlock,
+-#ifdef EXYNOS4210_ENHANCEMENTS
+-        getphys: gralloc_getphys,
+-#endif
+     },
+     framebuffer: 0,
+     flags: 0,
+@@ -118,7 +108,7 @@ struct private_module_t HAL_MODULE_INFO_SYM = {
+ /*****************************************************************************/
+ 
+ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+-        size_t size, int usage, buffer_handle_t* pHandle)
++        size_t size, int usage, buffer_handle_t* pHandle,int w,int h,int format,int stride,int hstride)
+ {
+     private_module_t* m = reinterpret_cast<private_module_t*>(
+             dev->common.module);
+@@ -141,7 +131,7 @@ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+         // we return a regular buffer which will be memcpy'ed to the main
+         // screen when post is called.
+         int newUsage = (usage & ~GRALLOC_USAGE_HW_FB) | GRALLOC_USAGE_HW_2D;
+-        return gralloc_alloc_buffer(dev, bufferSize, newUsage, pHandle);
++        return gralloc_alloc_buffer(dev, bufferSize, newUsage, pHandle,w,h,format,stride,hstride);
+     }
+ 
+     if (bufferMask >= ((1LU<<numBuffers)-1)) {
+@@ -151,6 +141,7 @@ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+ 
+     // create a "fake" handles for it
+     intptr_t vaddr = intptr_t(m->framebuffer->base);
++    unsigned int paddr = m->smem_start;
+     private_handle_t* hnd = new private_handle_t(dup(m->framebuffer->fd), size,
+             private_handle_t::PRIV_FLAGS_FRAMEBUFFER);
+ 
+@@ -161,53 +152,82 @@ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+             break;
+         }
+         vaddr += bufferSize;
++        paddr += bufferSize;
+     }
+-    
++
+     hnd->base = vaddr;
+     hnd->offset = vaddr - intptr_t(m->framebuffer->base);
++    hnd->p_addr = m->smem_start;
++    hnd->w = w;
++    hnd->h = h;
++    hnd->format = format;
++    hnd->alignedw = stride;
++    hnd->alignedh = hstride;
+     *pHandle = hnd;
+ 
+     return 0;
+ }
+ 
+ static int gralloc_alloc_framebuffer(alloc_device_t* dev,
+-        size_t size, int usage, buffer_handle_t* pHandle)
++        size_t size, int usage, buffer_handle_t* pHandle,int w,int h,int format,int stride,int hstride)
+ {
+     private_module_t* m = reinterpret_cast<private_module_t*>(
+             dev->common.module);
+     pthread_mutex_lock(&m->lock);
+-    int err = gralloc_alloc_framebuffer_locked(dev, size, usage, pHandle);
++    int err = gralloc_alloc_framebuffer_locked(dev, size, usage, pHandle,w,h,format,stride,hstride);
+     pthread_mutex_unlock(&m->lock);
+     return err;
+ }
+ 
+ static int gralloc_alloc_buffer(alloc_device_t* dev,
+-        size_t size, int usage, buffer_handle_t* pHandle)
++        size_t size, int usage, buffer_handle_t* pHandle,int w,int h,int format,int stride, int hstride)
++
+ {
+-    int err = 0;
+-    int fd = -1;
+-
+-    size = roundUpToPageSize(size);
+-    
+-    fd = ashmem_create_region("gralloc-buffer", size);
+-    if (fd < 0) {
+-        LOGE("couldn't create ashmem (%s)", strerror(-errno));
+-        err = -errno;
+-    }
++	int pgsize = PAGE_SIZE;
++	gralloc_context_t* ctx = (gralloc_context_t*)dev;
+ 
+-    if (err == 0) {
+-        private_handle_t* hnd = new private_handle_t(fd, size, 0);
+-        gralloc_module_t* module = reinterpret_cast<gralloc_module_t*>(
+-                dev->common.module);
+-        err = mapBuffer(module, hnd);
+-        if (err == 0) {
+-            *pHandle = hnd;
+-        }
+-    }
+-    
+-    LOGE_IF(err, "gralloc failed err=%s", strerror(-err));
+-    
+-    return err;
++	size = (size + pgsize) & (~(pgsize - 1));
++
++	size = 2* size;
++
++	/* get memory linear memory buffers */
++	int fd_handle = open("/dev/gememalloc", O_RDWR);
++    void* v_addr = mmap(0,size,PROT_READ | PROT_WRITE,MAP_SHARED,fd_handle,0);
++
++	if(v_addr == MAP_FAILED)
++	{
++		LOGE("gralloc allocation failed for %d\n",size);
++		return -1;
++	}
++
++   // create a duplicate handles for it
++    private_handle_t* hnd = new private_handle_t(dup(fd_handle), size, 0);
++
++    u32 p_addr;
++    pmem_region PmemRegion;
++    ioctl(fd_handle, PMEM_GET_PHYS, &PmemRegion);
++	p_addr = PmemRegion.offset;
++
++//    handle->lock(p_addr,v_addr,size);
++
++
++	memset(v_addr, 0,size/2);
++	// Save the physical address in offset and p_addr of handle
++    hnd->base = (int)v_addr;
++    hnd->offset = 0;
++	hnd->p_addr = (int)p_addr;
++	hnd->w = w;
++	hnd->h =h;
++	hnd->format = format;
++	hnd->alignedw = stride;
++	hnd->alignedh = hstride;
++//	hnd->handle = (void*)handle;
++	LOGV("gralloc_alloc_buffer: Handle Values physical addr %x,	virtual addr: %x", hnd->p_addr, hnd->base + hnd->offset);
++
++	close(fd_handle);
++
++    *pHandle = hnd;
++	return 0;
+ }
+ 
+ /*****************************************************************************/
+@@ -223,6 +243,9 @@ static int gralloc_alloc(alloc_device_t* dev,
+ 
+     int align = 4;
+     int bpp = 0;
++    int pad = 1;
++	unsigned int tempw	 = (w+31)&0xFFFFFFE0;
++	unsigned int temph	 = (h+31)&0xFFFFFFE0;
+     switch (format) {
+         case HAL_PIXEL_FORMAT_RGBA_8888:
+         case HAL_PIXEL_FORMAT_RGBX_8888:
+@@ -235,23 +258,48 @@ static int gralloc_alloc(alloc_device_t* dev,
+         case HAL_PIXEL_FORMAT_RGB_565:
+         case HAL_PIXEL_FORMAT_RGBA_5551:
+         case HAL_PIXEL_FORMAT_RGBA_4444:
++			tempw	 = (w+63)&0xFFFFFFC0;
++            bpp = 2;
++            break;
++        case HAL_PIXEL_FORMAT_YCrCb_420_SP:
++        case HAL_PIXEL_FORMAT_YCbCr_420_SP:
++        case HAL_PIXEL_FORMAT_YV12:
++        case HAL_PIXEL_FORMAT_YCbCr_420_P:
++			tempw	 = (w+63)&0xFFFFFFC0;
+             bpp = 2;
++		    pad = 0;
++            break;
++		case HAL_PIXEL_FORMAT_YCbCr_422_I:
++			tempw	 = (w+63)&0xFFFFFFC0;
++			bpp = 4;
++			pad = 0;
+             break;
+-        default:
++	 default:
+             return -EINVAL;
+     }
+     size_t bpr = (w*bpp + (align-1)) & ~(align-1);
++	if (!(usage & GRALLOC_USAGE_HW_FB)) {
++	bpr = (tempw*bpp + (align-1)) & ~(align-1);
++	}
+     size = bpr * h;
++	if (!(usage & GRALLOC_USAGE_HW_FB)) {
++		size = bpr*temph;
++	}
+     stride = bpr / bpp;
+-
+-    int err;
++	if(pad==0) {
++		tempw = w;
++		temph =  h;
++		stride = w;
++	}
++    int err =0;
+     if (usage & GRALLOC_USAGE_HW_FB) {
+-        err = gralloc_alloc_framebuffer(dev, size, usage, pHandle);
++        err = gralloc_alloc_framebuffer(dev, size, usage, pHandle,w,h,format,w,h);
+     } else {
+-        err = gralloc_alloc_buffer(dev, size, usage, pHandle);
++        err = gralloc_alloc_buffer(dev, size, usage, pHandle,w,h,format,stride,temph);
+     }
+ 
+     if (err < 0) {
++        LOGE("%s: err = %x",__FUNCTION__,err);
+         return err;
+     }
+ 
+@@ -272,11 +320,15 @@ static int gralloc_free(alloc_device_t* dev,
+                 dev->common.module);
+         const size_t bufferSize = m->finfo.line_length * m->info.yres;
+         int index = (hnd->base - m->framebuffer->base) / bufferSize;
+-        m->bufferMask &= ~(1<<index); 
+-    } else { 
+-        gralloc_module_t* module = reinterpret_cast<gralloc_module_t*>(
+-                dev->common.module);
+-        terminateBuffer(module, const_cast<private_handle_t*>(hnd));
++        m->bufferMask &= ~(1<<index);
++    } else {
++        LOGV("gralloc_free: Free - physical addr: %x   virtual addr: %x", hnd->p_addr, hnd->base);
++
++        //GhwMemHandle* handle = (GhwMemHandle*) hnd->handle;
++
++	    //handle->release();
++	    munmap((void*)hnd->base ,hnd->size);
++
+     }
+ 
+     close(hnd->fd);
+@@ -293,6 +345,10 @@ static int gralloc_close(struct hw_device_t *dev)
+         /* TODO: keep a list of all buffer_handle_t created, and free them
+          * all here.
+          */
++         delete ctx->allocator;
++         ctx->allocator = NULL;
++         close(ctx->gemem_master);
++         ctx->gemem_master = -1;
+         free(ctx);
+     }
+     return 0;
+@@ -318,6 +374,10 @@ int gralloc_device_open(const hw_module_t* module, const char* name,
+         dev->device.alloc   = gralloc_alloc;
+         dev->device.free    = gralloc_free;
+ 
++        dev->allocator = GhwMemAllocator::create(GhwMemAllocator::GHW_MEM_ALLOC_RETAIN_ONE, 4*1024*1024, 12);
++
++        dev->gemem_master = open("/dev/gememalloc", O_RDWR);
++
+         *device = &dev->device.common;
+         status = 0;
+     } else {
+diff --git a/modules/gralloc/gralloc_priv.h b/modules/gralloc/gralloc_priv.h
+index 75bcd1d..48fa37b 100644
+--- a/modules/gralloc/gralloc_priv.h
++++ b/modules/gralloc/gralloc_priv.h
+@@ -37,13 +37,13 @@ struct private_handle_t;
+ struct private_module_t {
+     gralloc_module_t base;
+ 
+-    private_handle_t* framebuffer;
++    struct private_handle_t* framebuffer;
+     uint32_t flags;
+     uint32_t numBuffers;
+     uint32_t bufferMask;
+     pthread_mutex_t lock;
+     buffer_handle_t currentBuffer;
+-    int pmem_master;
++    int gemem_master;
+     void* pmem_master_base;
+ 
+     struct fb_var_screeninfo info;
+@@ -51,6 +51,8 @@ struct private_module_t {
+     float xdpi;
+     float ydpi;
+     float fps;
++	int 	smem_start;
++	int 	vmem_start;
+ };
+ 
+ /*****************************************************************************/
+@@ -61,7 +63,7 @@ struct private_handle_t : public native_handle {
+ struct private_handle_t {
+     struct native_handle nativeHandle;
+ #endif
+-    
++
+     enum {
+         PRIV_FLAGS_FRAMEBUFFER = 0x00000001
+     };
+@@ -77,9 +79,18 @@ struct private_handle_t {
+     // FIXME: the attributes below should be out-of-line
+     int     base;
+     int     pid;
++    int     p_addr;
++    int		w;
++    int		h;
++    int		format;
++    int		alignedw;
++    int		alignedh;
++
++    void* handle;
+ 
+ #ifdef __cplusplus
+-    static const int sNumInts = 6;
++    static const int sNumInts = 12;
++
+     static const int sNumFds = 1;
+     static const int sMagic = 0x3141592;
+ 
+@@ -99,7 +110,7 @@ struct private_handle_t {
+         const private_handle_t* hnd = (const private_handle_t*)h;
+         if (!h || h->version != sizeof(native_handle) ||
+                 h->numInts != sNumInts || h->numFds != sNumFds ||
+-                hnd->magic != sMagic) 
++                hnd->magic != sMagic)
+         {
+             LOGE("invalid gralloc handle (at %p)", h);
+             return -EINVAL;
+diff --git a/modules/gralloc/mapper.cpp b/modules/gralloc/mapper.cpp
+index 33d0958..35b6939 100644
+--- a/modules/gralloc/mapper.cpp
++++ b/modules/gralloc/mapper.cpp
+@@ -50,8 +50,8 @@ static int gralloc_map(gralloc_module_t const* module,
+     private_handle_t* hnd = (private_handle_t*)handle;
+     if (!(hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER)) {
+         size_t size = hnd->size;
+-        void* mappedAddress = mmap(0, size,
+-                PROT_READ|PROT_WRITE, MAP_SHARED, hnd->fd, 0);
++		void* mappedAddress = mmap(0, hnd->size,
++                PROT_READ|PROT_WRITE, MAP_SHARED, hnd->fd , (unsigned long)hnd->p_addr);
+         if (mappedAddress == MAP_FAILED) {
+             LOGE("Could not mmap %s", strerror(errno));
+             return -errno;
+@@ -82,7 +82,7 @@ static int gralloc_unmap(gralloc_module_t const* module,
+ 
+ /*****************************************************************************/
+ 
+-static pthread_mutex_t sMapLock = PTHREAD_MUTEX_INITIALIZER; 
++static pthread_mutex_t sMapLock = PTHREAD_MUTEX_INITIALIZER;
+ 
+ /*****************************************************************************/
+ 
+@@ -125,17 +125,6 @@ int mapBuffer(gralloc_module_t const* module,
+     return gralloc_map(module, hnd, &vaddr);
+ }
+ 
+-int terminateBuffer(gralloc_module_t const* module,
+-        private_handle_t* hnd)
+-{
+-    if (hnd->base) {
+-        // this buffer was mapped, unmap it now
+-        gralloc_unmap(module, hnd);
+-    }
+-
+-    return 0;
+-}
+-
+ int gralloc_lock(gralloc_module_t const* module,
+         buffer_handle_t handle, int usage,
+         int l, int t, int w, int h,
+@@ -157,7 +146,7 @@ int gralloc_lock(gralloc_module_t const* module,
+     return 0;
+ }
+ 
+-int gralloc_unlock(gralloc_module_t const* module, 
++int gralloc_unlock(gralloc_module_t const* module,
+         buffer_handle_t handle)
+ {
+     // we're done with a software buffer. nothing to do in this
+diff --git a/modules/hwcomposer/Android.mk b/modules/hwcomposer/Android.mk
+index f1e819b..2a95db3 100644
+--- a/modules/hwcomposer/Android.mk
++++ b/modules/hwcomposer/Android.mk
+@@ -15,14 +15,22 @@
+ 
+ LOCAL_PATH := $(call my-dir)
+ 
+-# HAL module implemenation stored in
++# HAL module implemenation, not prelinked and stored in
+ # hw/<OVERLAY_HARDWARE_MODULE_ID>.<ro.product.board>.so
+ include $(CLEAR_VARS)
+-
++LOCAL_PRELINK_MODULE := false
+ LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
+-LOCAL_SHARED_LIBRARIES := liblog libEGL
++LOCAL_SHARED_LIBRARIES := liblog libEGL libc libGLESv1_CM libv3d
+ LOCAL_SRC_FILES := hwcomposer.cpp
++LOCAL_C_INCLUDES += \
++		hardware/libhardware/modules/gralloc \
++		brcm_usrlib/dag/v3d_library/inc \
++		hardware/libhardware/modules/gralloc \
++		hardware/common/opencore/codec/include 
++
++LOCAL_CFLAGS += -DDIRECT_RENDERING
++
+ LOCAL_MODULE := hwcomposer.default
+ LOCAL_CFLAGS:= -DLOG_TAG=\"hwcomposer\"
+-LOCAL_MODULE_TAGS := optional
++LOCAL_MODULE_TAGS := eng
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/modules/hwcomposer/hwcomposer.cpp b/modules/hwcomposer/hwcomposer.cpp
+index 68b7070..e11b786 100644
+--- a/modules/hwcomposer/hwcomposer.cpp
++++ b/modules/hwcomposer/hwcomposer.cpp
+@@ -22,15 +22,50 @@
+ #include <cutils/log.h>
+ #include <cutils/atomic.h>
+ 
++#include <cstring>
++
+ #include <hardware/hwcomposer.h>
+ 
++#include "ghw_composer.h"
++#include "gralloc_priv.h"
++#define EGL_EGLEXT_PROTOTYPES
+ #include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <GLES/gl.h>
+ 
+ /*****************************************************************************/
++namespace ghw{
++
++class GhwMemHandle_Wrap : public GhwMemHandle {
++public:
++	u32 mPhys;
++	void* mVirt;
++	u32 mSize;
++	u32 refcnt;
++	GhwMemHandle_Wrap(u32 phys,void* virt,u32 size):mPhys(phys),mVirt(virt),mSize(size),refcnt(1) {};
++    virtual    ghw_error_e     acquire(){refcnt++; return GHW_ERROR_NONE;};
++    virtual    ghw_error_e     release(){refcnt--; if(refcnt==0) delete this;return GHW_ERROR_NONE;};
++    virtual    ghw_error_e     lock(u32& ipa_addr, void*& virt_addr, u32& size){ipa_addr = mPhys; virt_addr = mVirt; size = mSize;return GHW_ERROR_NONE;};
++    virtual    ghw_error_e     unlock(){return GHW_ERROR_NONE;};
++
++    virtual    ghw_error_e     setName(const char *name){return GHW_ERROR_NONE;};
++    virtual    ghw_error_e     dump(u32 level = 0){return GHW_ERROR_NONE;};
++    virtual ~GhwMemHandle_Wrap(){};
++};
++
++};
++using namespace ghw;
++
++
+ 
+ struct hwc_context_t {
+     hwc_composer_device_t device;
+     /* our private state goes below here */
++	GhwComposer* local_composer;
++	GhwComposer* egl_composer;
++	bool useComposer;
++	unsigned int ucount;
++	unsigned int logtime;
+ };
+ 
+ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+@@ -68,23 +103,225 @@ static void dump_layer(hwc_layer_t const* l) {
+ }
+ 
+ static int hwc_prepare(hwc_composer_device_t *dev, hwc_layer_list_t* list) {
++
++    struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
++
+     if (list && (list->flags & HWC_GEOMETRY_CHANGED)) {
++		// Default Settings for composer is to use composer
++		// Hence Set useComposer to true 
++		// Also, Set the composition type to OVERLAY so that Surfaceflinger does not compose these layers
++		ctx->useComposer = true;
++		int compType= HWC_OVERLAY;
++		
+         for (size_t i=0 ; i<list->numHwLayers ; i++) {
+-            //dump_layer(&list->hwLayers[i]);
+-            list->hwLayers[i].compositionType = HWC_FRAMEBUFFER;
++			if(list->hwLayers[i].flags & HWC_SKIP_LAYER) {
++				// Surfaceflinger signalled that HW Composer should not compose this layer
++				// Current design is not capable of drawing some layers using OpenGL and some layers using HW Composer since 
++				// the Order of the requests to HW will be lost.
++				// Hence, when this signal is given, Force Surfaceflinger to composer all layers
++				ctx->useComposer = false;
++				compType = HWC_FRAMEBUFFER;
++				}
++        	}
++		for (size_t i=0 ; i<list->numHwLayers ; i++) {
++            list->hwLayers[i].compositionType = compType;
+         }
+     }
+     return 0;
+ }
+ 
++static int get_lib_format(const int& in, u32& format, u32& intformat)
++{
++	// Foy YUV layers , default output format after conversion is RGB565
++	// Change intformat also change the memory allocations and stride parameters in GRALLOC appropriately
++	switch(in)
++		{
++		case HAL_PIXEL_FORMAT_RGBA_8888:
++			format = GHW_PIXEL_FORMAT_RGBA_8888;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_RGBX_8888:
++			format = GHW_PIXEL_FORMAT_RGBX_8888;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_RGB_888:
++			format = GHW_PIXEL_FORMAT_RGB_888;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_RGB_565:
++			format = GHW_PIXEL_FORMAT_RGB_565;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_BGRA_8888:
++			format = GHW_PIXEL_FORMAT_BGRA_8888;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_RGBA_5551:
++			format = GHW_PIXEL_FORMAT_RGBA_5551;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_RGBA_4444:
++			format = GHW_PIXEL_FORMAT_RGBA_4444;
++			intformat = format;
++			break;
++		case HAL_PIXEL_FORMAT_YCrCb_420_SP:
++			format = GHW_PIXEL_FORMAT_YCrCb_420_SP;
++			intformat = GHW_PIXEL_FORMAT_RGB_565;
++			break;
++		case HAL_PIXEL_FORMAT_YCbCr_420_SP:
++			format = GHW_PIXEL_FORMAT_YCbCr_420_SP;
++			intformat = GHW_PIXEL_FORMAT_RGB_565;
++			break;
++		case HAL_PIXEL_FORMAT_YV12:
++			format = GHW_PIXEL_FORMAT_YCbCr_420_P;
++			intformat = GHW_PIXEL_FORMAT_RGB_565;
++			break;
++		case HAL_PIXEL_FORMAT_YCbCr_420_P:
++			format = GHW_PIXEL_FORMAT_YCbCr_420_P;
++			intformat = GHW_PIXEL_FORMAT_RGB_565;
++			break;
++		default:
++			LOGE("Unsupported format %d",in);
++			return -1;
++		}
++	return 0;
++}
++
+ static int hwc_set(hwc_composer_device_t *dev,
+         hwc_display_t dpy,
+         hwc_surface_t sur,
+         hwc_layer_list_t* list)
+ {
+-    //for (size_t i=0 ; i<list->numHwLayers ; i++) {
+-    //    dump_layer(&list->hwLayers[i]);
+-    //}
++    struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
++	u32 format = 0,intformat =0;
++	GhwComposer* composer;
++
++	// glEGLImageTargetTexture2DOES extension in BroadCom OpenGL library performs the tRSO to Tile Format conversion
++	// glGetTextureStorage is implemented in V3D OpenGL stack to retrieve the Texture physical address (in Tile Format)
++	// If Software OpenGL is used, the OpenGL extension might not be implemented or does not perform Tile Conversion
++	// In Such cases, Tile Conversion is performed here
++
++	const GLubyte* vendor = glGetString(GL_VENDOR);
++		
++	bool convert = (0 != strcmp((const char*)vendor , "Broadcom"));
++
++    void* tempptr = eglGetRenderBufferANDROID((EGLDisplay)dpy, (EGLSurface)sur);
++	ctx->egl_composer = (GhwComposer*)eglGetComposerANDROID((EGLDisplay)dpy, (EGLSurface)sur);
++
++	if (ctx->egl_composer) {
++		composer = ctx->egl_composer;
++		if (ctx->local_composer) {
++			delete ctx->local_composer;
++			ctx->local_composer = NULL;
++		}
++	} else {
++		if (ctx->local_composer == NULL) {
++			ctx->local_composer = GhwComposer::create();
++		}
++		composer = ctx->local_composer;
++	}
++
++	const private_handle_t* fbhandle = reinterpret_cast <const private_handle_t*> (tempptr);
++
++	if(fbhandle == NULL){
++		LOGE("fbhandle is NULL");
++		return 0;
++	}
++    GhwMemHandle* fbwrap = new GhwMemHandle_Wrap(fbhandle->p_addr + fbhandle->offset,(void*)(fbhandle->base),fbhandle->size);
++	GhwImgBuf* img = GhwImgBuf::create();
++	GhwImgBuf* intimg = GhwImgBuf::create();
++	GhwImgOp* op = GhwImgOp::create();
++
++	if( ctx->useComposer && list) {
++		img->setMemHandle(fbwrap);
++		img->setGeometry(fbhandle->alignedw,fbhandle->alignedh);
++		get_lib_format(fbhandle->format,format,intformat);
++		img->setFormat(format);
++		img->setCrop(fbhandle->w,fbhandle->h);
++
++		composer->compSetFb(img,GHW_DITHER_NONE);
++
++		for (size_t i=0 ; i<list->numHwLayers ; i++) {
++			const private_handle_t* handle = reinterpret_cast <const private_handle_t*>(list->hwLayers[i].handle);
++			if(handle == NULL) {
++				continue;
++				}
++			if(get_lib_format(handle->format,format,intformat)) {
++				LOGE("Skipping layer draw with unknown format %d",handle->format);
++				continue;
++				}
++			GhwMemHandle* wrap = new GhwMemHandle_Wrap(handle->p_addr,(void*)(handle->base),handle->size/2);
++			img->setMemHandle(wrap);
++			img->setGeometry(handle->alignedw,handle->alignedh);
++			img->setFormat(format);
++			img->setCrop(handle->w,handle->h);
++
++			GhwMemHandle* intwrap =  new GhwMemHandle_Wrap((u32)(handle->p_addr + (handle->size/2)),(void*)(handle->base+(handle->size/2)),handle->size/2);
++			intimg->setMemHandle(intwrap);
++			intimg->setGeometry(handle->alignedw,handle->alignedh);
++			intimg->setFormat(intformat,GHW_MEM_LAYOUT_TILED);
++			intimg->setCrop(handle->w,handle->h);
++
++			op->setDstWindow(0,0,handle->w,handle->h);
++			op->setTransform(0);
++
++			if(convert) composer->imgProcess(img,intimg,op,0);
++
++			hwc_rect_t* rect = &list->hwLayers[i].sourceCrop;
++			intimg->setCrop(rect->left,rect->top,rect->right,rect->bottom);
++
++			rect = &list->hwLayers[i].displayFrame;
++			op->setDstWindow(rect->left,rect->top,rect->right,rect->bottom);
++			op->setTransform(list->hwLayers[i].transform);
++
++			composer->compDrawRect(intimg,op);
++			wrap->release();
++			intwrap->release();
++			}
++		composer->compCommit(0);
++		composer->barrier();
++		}
++	else {
++		glFlush();
++
++		if((fbhandle->format == HAL_PIXEL_FORMAT_BGRA_8888) && !convert) {
++			
++			img->setMemHandle(fbwrap);
++			img->setGeometry(fbhandle->alignedw,fbhandle->alignedh);
++			get_lib_format(HAL_PIXEL_FORMAT_RGBA_8888,format,intformat);
++			img->setFormat(format);
++			img->setCrop(fbhandle->w,fbhandle->h);
++
++			intimg->setMemHandle(fbwrap);
++			intimg->setGeometry(fbhandle->alignedw,fbhandle->alignedh);
++			get_lib_format(fbhandle->format,format,intformat);
++			intimg->setFormat(format);
++			intimg->setCrop(fbhandle->w,fbhandle->h);
++
++			op->setDstWindow(0,0,fbhandle->alignedw,fbhandle->alignedh);
++			op->setTransform(0);
++
++			composer->imgProcess(img,intimg,op,0);
++			}
++		composer->barrier();
++
++		}
++		
++		fbwrap->release();
++		delete img;
++		delete intimg;
++		delete op;
++
++        struct timeval t1;
++        gettimeofday(&t1,NULL);
++
++        if(t1.tv_sec == ctx->logtime) {
++			ctx->ucount++;
++			} else {
++			LOGE("FrameBuffer [%d] reloads", ctx->ucount);
++			ctx->ucount = 1;
++			ctx->logtime = t1.tv_sec;
++			}
+ 
+     EGLBoolean sucess = eglSwapBuffers((EGLDisplay)dpy, (EGLSurface)sur);
+     if (!sucess) {
+@@ -97,6 +334,9 @@ static int hwc_device_close(struct hw_device_t *dev)
+ {
+     struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
+     if (ctx) {
++		delete ctx->local_composer;
++		ctx->local_composer = NULL;
++		ctx->egl_composer = NULL;
+         free(ctx);
+     }
+     return 0;
+@@ -108,6 +348,7 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+         struct hw_device_t** device)
+ {
+     int status = -EINVAL;
++	LOGE("hwc_device_open");
+     if (!strcmp(name, HWC_HARDWARE_COMPOSER)) {
+         struct hwc_context_t *dev;
+         dev = (hwc_context_t*)malloc(sizeof(*dev));
+@@ -123,7 +364,11 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+ 
+         dev->device.prepare = hwc_prepare;
+         dev->device.set = hwc_set;
++		dev->local_composer = GhwComposer::create();
++		dev->useComposer = true;
+ 
++        dev->logtime =0;
++		dev->ucount =0;
+         *device = &dev->device.common;
+         status = 0;
+     }
+
+project system/core/
+diff --git a/include/system/graphics.h b/include/system/graphics.h
+old mode 100644
+new mode 100755
+index 729e92c..78429d0
+--- a/include/system/graphics.h
++++ b/include/system/graphics.h
+@@ -84,7 +84,7 @@ enum {
+      *   cb_offset = y_size + c_size
+      *
+      */
+-    HAL_PIXEL_FORMAT_YV12   = 0x32315659, // YCrCb 4:2:0 Planar
++//    HAL_PIXEL_FORMAT_YV12   = 0x32315659, // YCrCb 4:2:0 Planar
+ 
+ 
+ 
+@@ -92,6 +92,9 @@ enum {
+     HAL_PIXEL_FORMAT_YCbCr_422_SP       = 0x10, // NV16
+     HAL_PIXEL_FORMAT_YCrCb_420_SP       = 0x11, // NV21
+     HAL_PIXEL_FORMAT_YCbCr_422_I        = 0x14, // YUY2
++    HAL_PIXEL_FORMAT_YCbCr_420_SP	= 0x15,
++    HAL_PIXEL_FORMAT_YV12		= 0x16,
++    HAL_PIXEL_FORMAT_YCbCr_420_P	= 0x17,
+ };
+ 
+ 
